@@ -54,7 +54,21 @@ COMPILE TIME OPTIONS
     to either B8G8R8A8, B8G8R8X8, or R8G8B8A8
 
 SUPPORT
+| Type                  | Header             | Supported |
+| --------------------- | ------------------ | --------- |
+| Windows 2.0, OS/2 1.x | BITMAPCOREHEADER   | No        |
+| OS/2 v2               | OS22XBITMAPHEADER  | No        |
+| OS/2 v2 Variant       | OS22XBITMAPHEADER  | No        |
+| Windows NT, 3.1x      | BITMAPINFOHEADER   | Partially |
+| Undocumented          | BITMAPV2INFOHEADER | No        |
+| Adobe                 | BITMAPV3INFOHEADER | No        |
+| Windows NT 4, 95      | BITMAPV4HEADER     | No        |
+| Windows NT 5, 98      | BITMAPV5HEADER     | Partially |
 
+Encodings
+| Type                  | Supported |
+| --------------------- | --------- |
+| Paletted RLE2         | No        |
 
 CONTRIBUTION
 Michael Dodis (michaeldodisgr@gmail.com)
@@ -66,6 +80,12 @@ TODO
 
 BYTE ORDER / ENDIANESS
 Components are typed in c array order (least significant address comes first).
+
+REFERENCES
+- http://justsolve.archiveteam.org/wiki/BMP
+- https://archive.org/details/OS2BBS
+- https://www.fileformat.info/format/os2bmp/egff.htm
+- https://en.wikipedia.org/wiki/BMP_file_format
 
 */
 #ifndef SFL_BMP_H
@@ -118,24 +138,76 @@ typedef enum {
 
 typedef enum {
     /** Image Y axis starts from the bottom */
-    SFL_BMP_ATTRIBUTE_FLIPPED = 1 << 0,
+    SFL_BMP_ATTRIBUTE_FLIPPED    = 1 << 0,
+    /** Uses color table */
+    SFL_BMP_ATTRIBUTE_PALETTIZED = 1 << 1,
 } SflBmpAttributes;
+
+typedef enum {
+    SFL_BMP_HDR_ID_NA = 0,
+    SFL_BMP_HDR_ID_BM = 1,
+    SFL_BMP_HDR_ID_BA = 2,
+    SFL_BMP_HDR_ID_CI = 3,
+    SFL_BMP_HDR_ID_CP = 4,
+    SFL_BMP_HDR_ID_IC = 5,
+    SFL_BMP_HDR_ID_PT = 6,
+} SflBmpHdrID;
+
+typedef enum {
+    
+    SFL_BMP_NFO_ID_NA      = 0, /** Unrecognizble Info header type */
+    SFL_BMP_NFO_ID_CORE    = 1, /** ( 12) BITMAPCOREHEADER */
+    SFL_BMP_NFO_ID_OS22_V1 = 2, /** ( 64) OS22XBITMAPHEADER */
+    SFL_BMP_NFO_ID_OS22_V2 = 3, /** ( 16) OS22XBITMAPHEADER */
+    SFL_BMP_NFO_ID_V1      = 4, /** ( 40) BITMAPINFOHEADER */
+    SFL_BMP_NFO_ID_V2      = 5, /** ( 52) BITMAPV2INFOHEADER */
+    SFL_BMP_NFO_ID_V3      = 6, /** ( 56) BITMAPV3INFOHEADER */
+    SFL_BMP_NFO_ID_V4      = 7, /** (108) BITMAPV4HEADER */
+    SFL_BMP_NFO_ID_V5      = 8, /** (124) BITMAPV5HEADER */
+} SflBmpNfoID;
+
+typedef enum {
+    SFL_BMP_COMPRESSION_NONE      = 0,
+    SFL_BMP_COMPRESSION_RLE8      = 1,
+    SFL_BMP_COMPRESSION_RLE4      = 2,
+    SFL_BMP_COMPRESSION_BITFIELDS = 3,
+} SflBmpCompression;
+
+typedef enum {
+    SFL_BMP_COLORSPACE_CALIBRATED_RGB   = 0,
+    SFL_BMP_COLORSPACE_SRGB             = 'sRGB',
+    SFL_BMP_COLORSPACE_WINDOWS          = 'Win ',
+    SFL_BMP_COLORSPACE_PROFILE_LINKED   = 'LINK',
+    SFL_BMP_COLORSPACE_PROFILE_EMBEDDED = 'MBED',
+} SflBmpColorspace;
 
 typedef struct {
     /** The image data */
     void *data;
-    /** The width of the image (> 0) */
-    SflBmpI32 width;
-    /** The height of the image (> 0) */
-    SflBmpI32 height;
-    /** The amount of bytes per row */
+    /** The width of the image */
+    SflBmpU32 width;
+    /** The height of the image */
+    SflBmpU32 height;
+    /** The amount of bytes per row/scan-line */
     SflBmpU32 pitch;
     /** @see: SflBmpAttributes */
-    SflBmpU32 attributes;
+    int attributes;
     /** Size (in bytes) */
     SflBmpU32 size;
-    /** Pixel format of image data (always truecolor) */
+    /** Pixel format of image data */
     SflBmpU32 format;
+    /** File header id, @see SflBmpHdrID */
+    int file_header_id;
+    /** Info header id, @see SflBmpNfoID */
+    int info_header_id;
+    /** Compression method, @see SflBmpCompressionMethod */
+    int compression;
+    /** Offset into the pixel data */
+    SflBmpU32 offset;
+    /** Offset into table data */ 
+    SflBmpU32 table_offset;
+    /** Color masks (r, g, b, a)*/
+    SflBmpU32 mask[4];
 } SflBmpDesc;
 
 #define PROC_SFL_BMP_IO_READ(name) int name(void *usr, void *ptr, size_t size)
@@ -180,6 +252,15 @@ extern void sfl_bmp_read_context_set_io_usr(
 extern void sfl_bmp_read_context_set_memory_usr(
     SflBmpReadContext *ctx, 
     void *usr);
+
+/** 
+ * Returns description of the file 
+ * @param ctx  The read context
+ * @param desc The descriptor to write to
+ */
+extern int sfl_bmp_read_context_probe(
+    SflBmpReadContext *ctx,
+    SflBmpDesc *desc);
 
 extern int sfl_bmp_read_context_decode(
     SflBmpReadContext *ctx,
@@ -227,11 +308,7 @@ typedef struct {
  * BITMAPINFOHEADER (Windows NT, 3.1x or later)
  */
 typedef struct {
-    SflBmpU32 info_size;
-    SflBmpI32 width;
-    SflBmpI32 height;
-    SflBmpU16 num_planes;
-    SflBmpU16 bpp;
+    SflBmpCoreHeader core;
     SflBmpU32 compression;
     SflBmpU32 raw_size;
     SflBmpI32 horizontal_resolution;
@@ -239,6 +316,27 @@ typedef struct {
     SflBmpU32 num_colors;
     SflBmpU32 num_important_colors;
 } SflBmpInfoHeader040;
+
+/**
+ * OS22XBITMAPHEADER (OS/2 v2 Variant)
+ */
+typedef struct {
+    SflBmpCoreHeader core;
+    SflBmpU32 compression;
+    SflBmpU32 raw_size;
+    SflBmpI32 horizontal_resolution;
+    SflBmpI32 vertical_resolution;
+    SflBmpU32 num_colors;
+    SflBmpU32 num_important_colors;
+    SflBmpU16 units;
+    SflBmpU16 reserved;
+    SflBmpU16 recording;
+    SflBmpU16 rendering;
+    SflBmpU16 size1;
+    SflBmpU16 size2;
+    SflBmpU16 color_encoding;
+    SflBmpU16 identifier;
+} SflBmpInfoHeader064;
 
 /**
  * BITMAPV5HEADER (Windows NT 5.0, 98 or later)
@@ -249,25 +347,45 @@ typedef struct {
     SflBmpI32 height;
     SflBmpU16 planes;
     SflBmpU16 bpp;
+    /** Specifies bitmap compression method. Valid when used with 16, 32 bpp */
     SflBmpU32 compression;
+    /** Size of image in bytes. Can be zero for SFL_BMP_COMPRESSION_RGB */
     SflBmpU32 raw_size;
+    /** Horizontal resolution in pixels per meter. */
     SflBmpI32 hres;
+    /** Vertical resolution in pixels per meter. */
     SflBmpI32 vres;
+    /** Count of color entries in table */
     SflBmpU32 num_colors;
+    /** Count of required color entries in table. If zero, then all are required. */
     SflBmpU32 num_important_colors;
+    /** Red color mask. Valid only if using SFL_BMP_COMPRESSION_BITFIELDS */
     SflBmpU32 red_mask;
+    /** Green color mask. Valid only if using SFL_BMP_COMPRESSION_BITFIELDS */
     SflBmpU32 green_mask;
+    /** Blue color mask. Valid only if using SFL_BMP_COMPRESSION_BITFIELDS */
     SflBmpU32 blue_mask;
+    /** Alpha color mask */
     SflBmpU32 alpha_mask;
+    /** The color space of the bitmap */
     SflBmpU32 color_space;
+    /** Red endpoint for logical color space */
     SflBmpI32 endpoint_red[3];
+    /** Green endpoint for logical color space */
     SflBmpI32 endpoint_green[3];
+    /** Blue endpoint for logical color space */
     SflBmpI32 endpoint_blue[3];
+    /** Toned response curve for red */
     SflBmpU32 gamma_red;
+    /** Toned response curve for green */
     SflBmpU32 gamma_green;
+    /** Toned response curve for blue */
     SflBmpU32 gamma_blue;
+    /** Rendering intent */
     SflBmpU32 intent;
+    /** Offset to start of profile data */
     SflBmpU32 profile_data_offset;
+    /** Size in bytes of embedded profile data */ 
     SflBmpU32 profile_data_size;
     SflBmpU32 reserved;
 } SflBmpInfoHeader124;
@@ -305,13 +423,6 @@ typedef struct {
     SflBmpU32 i_abits;
 } SflBmpConvertSettings;
 
-enum {
-    SFL_BMP_COMPRESSION_NONE      = 0,
-    SFL_BMP_COMPRESSION_RLE8      = 1,
-    SFL_BMP_COMPRESSION_RLE4      = 2,
-    SFL_BMP_COMPRESSION_BITFIELDS = 3,
-};
-
 #define SFL_BMP_READ_STRUCT(T, ctx, dst) \
     (ctx->io->read(ctx->io->usr, (void*)dst, sizeof(T)) == 1)
 
@@ -328,6 +439,11 @@ enum {
     ctx->mem->release(ctx->mem->usr, ptr)
 
 static int sfl_bmp_read_context_decode040(
+    SflBmpReadContext *ctx,
+    SflBmpFileHeader *file_header,
+    SflBmpDesc *desc);
+
+static int sfl_bmp_read_context_decode064(
     SflBmpReadContext *ctx,
     SflBmpFileHeader *file_header,
     SflBmpDesc *desc);
@@ -393,6 +509,10 @@ static SflBmpU32 sfl_bmp_ipow(SflBmpU32 base, SflBmpU32 exponent) {
     return result;
 }
 
+static SflBmpI32 sfl_bmp_iabs(SflBmpI32 value) {
+    return value < 0 ? -value : value;
+}
+
 const char *sfl_bmp_describe_pixel_format(int format) {
     const char *desc_string = "Invalid Format";
     switch (format) {
@@ -440,6 +560,142 @@ void sfl_bmp_read_context_set_io_usr(SflBmpReadContext *ctx, void *usr) {
 void sfl_bmp_read_context_set_memory_usr(SflBmpReadContext *ctx, void *usr) {
     ctx->mem->usr = usr;
 }
+
+static SflBmpHdrID sfl_bmp_get_hdr_id(char *header) {
+    if (header[0] == 'B' && header[1] == 'M') {
+        return SFL_BMP_HDR_ID_BM;
+    }
+
+    if (header[0] == 'B' && header[1] == 'A') {
+        return SFL_BMP_HDR_ID_BA;
+    }
+
+    if (header[0] == 'C' && header[1] == 'I') {
+        return SFL_BMP_HDR_ID_CI;
+    }
+
+    if (header[0] == 'C' && header[1] == 'P') {
+        return SFL_BMP_HDR_ID_CP;
+    }
+
+    if (header[0] == 'I' && header[1] == 'C') {
+        return SFL_BMP_HDR_ID_IC;
+    }
+
+    if (header[0] == 'P' && header[1] == 'T') {
+        return SFL_BMP_HDR_ID_PT;
+    }
+
+    return SFL_BMP_HDR_ID_NA;
+}
+
+static int sfl_bmp_get_nfo_id(SflBmpU32 info_size) {
+    switch (info_size) {
+        case  12: return SFL_BMP_NFO_ID_CORE;    break;
+        case  64: return SFL_BMP_NFO_ID_OS22_V1; break;
+        case  16: return SFL_BMP_NFO_ID_OS22_V2; break;
+        case  40: return SFL_BMP_NFO_ID_V1;      break;
+        case  52: return SFL_BMP_NFO_ID_V2;      break;
+        case  56: return SFL_BMP_NFO_ID_V3;      break;
+        case 108: return SFL_BMP_NFO_ID_V4;      break;
+        case 124: return SFL_BMP_NFO_ID_V5;      break;
+        default:  return SFL_BMP_NFO_ID_NA;      break;
+    }
+}
+
+int sfl_bmp_read_context_probe(
+    SflBmpReadContext *ctx,
+    SflBmpDesc *desc)
+{
+    /* Read in file header and determine file type */
+    SflBmpFileHeader file_header;
+    if (!SFL_BMP_READ_STRUCT(SflBmpFileHeader, ctx, &file_header)) {
+        goto EXIT_ERROR;
+    }
+
+    SflBmpHdrID hdr_id = sfl_bmp_get_hdr_id(file_header.hdr);
+    if (hdr_id == SFL_BMP_HDR_ID_NA) {
+        goto EXIT_ERROR;
+    }
+
+    /* Read in  header size and get info header kind */
+    SflBmpU32 info_header_size;
+    if (!SFL_BMP_READ(ctx, &info_header_size, sizeof(info_header_size))) {
+        goto EXIT_ERROR;
+    }
+
+    if (SFL_BMP_SEEK(ctx, -((long)sizeof(info_header_size)), SFL_BMP_IO_CUR)) {
+        goto EXIT_ERROR;
+    }
+
+    int nfo_id = sfl_bmp_get_nfo_id(info_header_size);
+
+    /* Set initial values for descriptor */
+    desc->attributes = 0;
+    desc->offset = file_header.offset;
+    desc->table_offset = sizeof(SflBmpFileHeader) + info_header_size;
+    
+    switch (nfo_id) {
+        case SFL_BMP_NFO_ID_CORE: {
+            /* 
+            @note: Core headers for Windows 2.0 and OS/2 1.x differ in dimension
+            signage
+            */
+
+        } break;
+
+        case SFL_BMP_NFO_ID_OS22_V1: {
+
+        } break;
+
+        case SFL_BMP_NFO_ID_OS22_V2: {
+
+        } break;
+
+        case SFL_BMP_NFO_ID_V1: {
+
+        } break;
+
+        case SFL_BMP_NFO_ID_V2: {
+
+        } break;
+
+        case SFL_BMP_NFO_ID_V3: {
+
+        } break;
+
+        case SFL_BMP_NFO_ID_V4: {
+
+        } break;
+
+        case SFL_BMP_NFO_ID_V5: {
+            SflBmpInfoHeader124 info_header;
+            if (!SFL_BMP_READ_STRUCT(SflBmpInfoHeader124, ctx, &info_header)) {
+                goto EXIT_ERROR;
+            }
+            desc->width = info_header.width;
+            desc->height = sfl_bmp_iabs(info_header.height);
+            
+            if (info_header.height < 0) {
+                desc->attributes &= SFL_BMP_ATTRIBUTE_FLIPPED;
+            }
+
+            desc->mask[0] = info_header.red_mask;
+            desc->mask[1] = info_header.green_mask;
+            desc->mask[2] = info_header.blue_mask;
+            desc->mask[3] = info_header.alpha_mask;
+            
+
+        } break;
+
+        case SFL_BMP_NFO_ID_NA:
+        default: break;
+    }
+
+EXIT_ERROR:
+    return 0;
+}
+
 
 int sfl_bmp_read_context_decode(SflBmpReadContext *ctx, SflBmpDesc *desc) {
     /** Read in file header and determine file type */
@@ -496,21 +752,42 @@ static int sfl_bmp_read_context_decode040(
     SflBmpDecodeSettings settings;
     settings.num_colors = info_header.num_colors;
     settings.compression = info_header.compression;
-    settings.bpp = info_header.bpp;
-    settings.width = info_header.width;
-    settings.height = info_header.height;
+    settings.bpp = info_header.core.bpp;
+    settings.width = info_header.core.width;
+    settings.height = info_header.core.height;
     settings.offset = file_header->offset;
     settings.table_offset = sizeof(SflBmpFileHeader) + sizeof(info_header);
     
-    return sfl_bmp_read_context_extract(
-        ctx,
-        &settings,
-        desc);
+    return sfl_bmp_read_context_extract(ctx, &settings, desc);
     
 EXIT_ERROR:
     return 0;
 }
 
+
+static int sfl_bmp_read_context_decode064(
+    SflBmpReadContext *ctx,
+    SflBmpFileHeader *file_header,
+    SflBmpDesc *desc)
+{
+    SflBmpInfoHeader064 info_header;
+    if (!SFL_BMP_READ_STRUCT(SflBmpInfoHeader064, ctx, &info_header)) {
+        goto EXIT_ERROR;
+    }
+    SflBmpDecodeSettings settings;
+    settings.num_colors = info_header.num_colors;
+    settings.compression = info_header.compression;
+    settings.bpp = info_header.core.bpp;
+    settings.width = info_header.core.width;
+    settings.height = info_header.core.height;
+    settings.offset = file_header->offset;
+    settings.table_offset = sizeof(SflBmpFileHeader) + sizeof(info_header);
+
+    return sfl_bmp_read_context_extract(ctx, &settings, desc);
+    
+EXIT_ERROR:
+    return 0;
+}
 
 static int sfl_bmp_read_context_decode124(
     SflBmpReadContext *ctx,
@@ -535,10 +812,8 @@ static int sfl_bmp_read_context_decode124(
     settings.g_mask = info_header.green_mask;
     settings.b_mask = info_header.blue_mask;
     settings.a_mask = info_header.alpha_mask;
-    return sfl_bmp_read_context_extract(
-        ctx,
-        &settings,
-        desc);
+
+    return sfl_bmp_read_context_extract(ctx, &settings, desc);
     
 EXIT_ERROR:
     return 0;

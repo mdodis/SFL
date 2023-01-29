@@ -6,3 +6,5 @@ target_link_libraries(d3d_viewer
     "d3d11"
     "d3dcompiler"
     )
+
+add_subdirectory("./fs_watch")
