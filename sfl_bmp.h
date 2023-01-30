@@ -113,6 +113,8 @@ REFERENCES
 
 #if !SFL_BMP_CUSTOM_TYPES
 #include <stdint.h>
+#include <stddef.h>
+typedef size_t   SflBmpUSize;
 typedef int32_t  SflBmpI32;
 typedef uint32_t SflBmpU32;
 typedef int16_t  SflBmpI16;
@@ -210,7 +212,7 @@ typedef struct {
     SflBmpU32 mask[4];
 } SflBmpDesc;
 
-#define PROC_SFL_BMP_IO_READ(name) int name(void *usr, void *ptr, size_t size)
+#define PROC_SFL_BMP_IO_READ(name) int name(void *usr, void *ptr, SflBmpUSize size)
 #define PROC_SFL_BMP_IO_SEEK(name) int name(void *usr, long offset, SflBmpIOWhence whence)
 #define PROC_SFL_BMP_IO_TELL(name) long name(void *usr)
 
@@ -225,7 +227,7 @@ typedef struct {
     void *usr;
 } SflBmpIOImplementation;
 
-#define PROC_SFL_BMP_MEMORY_ALLOCATE(name) void *name(void *usr, size_t size)
+#define PROC_SFL_BMP_MEMORY_ALLOCATE(name) void *name(void *usr, SflBmpUSize size)
 #define PROC_SFL_BMP_MEMORY_RELEASE(name)  void  name(void *usr, void *ptr)
 typedef PROC_SFL_BMP_MEMORY_ALLOCATE(ProcSflBmpMemoryAllocate);
 typedef PROC_SFL_BMP_MEMORY_RELEASE(ProcSflBmpMemoryRelease);

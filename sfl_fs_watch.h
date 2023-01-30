@@ -22,8 +22,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+COMPILE TIME OPTIONS
+
+#define SFL_FS_WATCH_ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
+    Sets struct memory to zero
+
 CONTRIBUTION
 Michael Dodis (michaeldodisgr@gmail.com)
+
+@todo:
+    - Allow for custom malloc/realloc/free
 */
 
 #ifndef SFL_FS_WATCH_H
@@ -33,34 +41,97 @@ Michael Dodis (michaeldodisgr@gmail.com)
     #define SFL_FS_WATCH_OS_WINDOWS 1
 #endif
 
+#ifdef __linux__
+    #define SFL_FS_WATCH_OS_LINUX   1
+#endif
+
 #ifndef SFL_FS_WATCH_OS_WINDOWS
     #define SFL_FS_WATCH_OS_WINDOWS 0
 #endif
 
+#ifndef SFL_FS_WATCH_OS_LINUX
+    #define SFL_FS_WATCH_OS_LINUX   0
+#endif
+
+typedef enum {
+    SFL_FS_WATCH_NOTIFICATION_INVALID = 0,
+    SFL_FS_WATCH_NOTIFICATION_FILE_CREATED = 1,
+    SFL_FS_WATCH_NOTIFICATION_FILE_DELETED = 2,
+    SFL_FS_WATCH_NOTIFICATION_FILE_MODIFIED = 3
+} SflFsWatchNotificationKind;
+
+typedef enum {
+    SFL_FS_WATCH_RESULT_NONE = 0,
+    SFL_FS_WATCH_RESULT_TIMEOUT = 1,
+    SFL_FS_WATCH_RESULT_ERROR = -1,
+} SflFsWatchResult;
+
 typedef struct {
-    void *handle;
-    const char *directory;
-    void *extra;
-    unsigned char *buffer;
-} SflFsWatchEntry;
+    const char *path;
+    /** Notification kind, @see SflFsWatchNotificationKind */
+    SflFsWatchNotificationKind kind;
+} SflFsWatchFileNotification;
+
+#define PROC_SFL_FS_WATCH_NOTIFY(name) void name(SflFsWatchFileNotification *notification, void *usr)
+typedef PROC_SFL_FS_WATCH_NOTIFY(ProcSflFsWatchNotify);
+
+#if SFL_FS_WATCH_OS_WINDOWS
+/* Declare win32 compatible types to avoid including windows, just in case */
+typedef void* SflFsWatchWin32Handle;
+typedef struct _SflFsWatchEntry SflFsWatchEntry;
 
 typedef struct {
     SflFsWatchEntry *entries;
     const char **watched_files;
-    void *internal;
+    SflFsWatchWin32Handle iocp;
+    ProcSflFsWatchNotify *notify_proc;
+    void *usr;
 } SflFsWatchContext;
 
-extern void sfl_fs_watch_init(SflFsWatchContext *ctx);
-extern void sfl_fs_watch_deinit(SflFsWatchContext *ctx);
-extern void sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path);
-extern int  sfl_fs_watch_poll(SflFsWatchContext *ctx);
-extern void sfl_fs_watch_wait(SflFsWatchContext *ctx);
+#elif SFL_FS_WATCH_OS_LINUX
+typedef struct _SflFsWatchEntry SflFsWatchEntry;
+
+typedef struct {
+    int notify_fd;
+    SflFsWatchEntry *entries;    
+    ProcSflFsWatchNotify *notify_proc;
+    void *usr;
+    void *buffer;
+} SflFsWatchContext;
 
 #endif
 
-// #if SFL_FS_WATCH_IMPLEMENTATION
-#if 1
-/* @todo: Allow for custom malloc/free implementations */
+
+extern void sfl_fs_watch_init(SflFsWatchContext *ctx, ProcSflFsWatchNotify *notify, void *usr);
+extern void sfl_fs_watch_deinit(SflFsWatchContext *ctx);
+extern int  sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path);
+/** 
+ * Check for any events and handle them if there are any
+ * @param ctx The Context
+ * @return One of the following:
+ *  - SFL_FS_WATCH_RESULT_NONE:    Changes were recorded and handled
+ *  - SFL_FS_WATCH_RESULT_TIMEOUT: No changes were recorded
+ *  - SFL_FS_WATCH_RESULT_ERROR:   There was an I/O error when polling
+ */
+extern SflFsWatchResult sfl_fs_watch_poll(SflFsWatchContext *ctx);
+extern int  sfl_fs_watch_wait(SflFsWatchContext *ctx);
+static inline const char *sfl_fs_watch_notification_kind_to_string(SflFsWatchNotificationKind kind) {
+    switch (kind) {
+        case SFL_FS_WATCH_NOTIFICATION_INVALID:       return "Invalid";  break;
+        case SFL_FS_WATCH_NOTIFICATION_FILE_CREATED:  return "Created";  break;
+        case SFL_FS_WATCH_NOTIFICATION_FILE_DELETED:  return "Deleted";  break;
+        case SFL_FS_WATCH_NOTIFICATION_FILE_MODIFIED: return "Modified"; break;
+        default: return ""; break;
+    }
+}
+#endif
+
+#ifdef SFL_FS_WATCH_IMPLEMENTATION
+
+#ifndef SFL_FS_WATCH_ZERO_MEMORY
+    #include <string.h>
+    #define SFL_FS_WATCH_ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
+#endif
 
 #include <stdlib.h>
 /* Stretchy buffer implementation */
@@ -97,11 +168,15 @@ static void *sfl_fs_watch_sb_growf(void *arr, int increment, int itemsize)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#define SFL_FS_WATCH_BUFFER_SIZE (64 * 1024 * 1024)
+typedef struct _SflFsWatchEntry {
+    SflFsWatchWin32Handle handle;
+    const char *directory;
+    OVERLAPPED *ovl;
+    unsigned char *buffer;
+} SflFsWatchEntry;
 
-typedef struct {
-    HANDLE iocp;
-} SflFsWatchContextInternal;
+
+#define SFL_FS_WATCH_BUFFER_SIZE (64 * 1024 * 1024)
 
 static void sfl_fs_watch_attach_to_iocp(
     HANDLE file, 
@@ -140,10 +215,10 @@ static DWORD sfl_fs_watch_poll_iocp(
 }
 
 static int sfl_fs_watch_issue_entry(SflFsWatchEntry *entry) {
-    HANDLE dir_handle = (HANDLE)entry->handle;
     if (entry->handle == INVALID_HANDLE_VALUE) {
         return -1;
     }
+    HANDLE dir_handle = (HANDLE)entry->handle;
 
     const DWORD filter = 
         FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
@@ -158,23 +233,92 @@ static int sfl_fs_watch_issue_entry(SflFsWatchEntry *entry) {
         FALSE,
         filter,
         &undefined,
-        (OVERLAPPED*)entry->extra,
+        (OVERLAPPED*)entry->ovl,
         0);
     return 0;
 }
 
-void sfl_fs_watch_init(SflFsWatchContext *ctx) {
+static const char *sfl_fs_watch_wstr_to_multibyte(
+    const wchar_t *wstr,
+    int wstr_len) 
+{
+    if (wstr_len == 0)
+        wstr_len = (int)wcslen(wstr);
+
+    int num_bytes = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wstr,
+        wstr_len,
+        0, 0, 0, 0);
+    
+    char *result = malloc(num_bytes + 1);
+
+    WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        wstr,
+        wstr_len,
+        result,
+        num_bytes,
+        0,
+        0);
+
+    result[num_bytes] = 0;
+    return result;    
+}
+
+static void sfl_fs_watch_get_notifications(
+    SflFsWatchContext *ctx, 
+    SflFsWatchEntry *entry) 
+{
+    const FILE_NOTIFY_INFORMATION *fni = (const FILE_NOTIFY_INFORMATION*)
+        entry->buffer;
+    for (;;) {
+        const char *path = sfl_fs_watch_wstr_to_multibyte(
+            fni->FileName,
+            fni->FileNameLength / sizeof(wchar_t));
+
+        SflFsWatchFileNotification notification;
+        notification.path = path;
+
+        switch (fni->Action) {
+            case FILE_ACTION_ADDED:
+		    case FILE_ACTION_RENAMED_NEW_NAME:
+			    notification.kind = SFL_FS_WATCH_NOTIFICATION_FILE_CREATED;
+                break;
+		    case FILE_ACTION_REMOVED:
+		    case FILE_ACTION_RENAMED_OLD_NAME:
+			    notification.kind = SFL_FS_WATCH_NOTIFICATION_FILE_DELETED;
+                break;
+		    case FILE_ACTION_MODIFIED:
+			    notification.kind = SFL_FS_WATCH_NOTIFICATION_FILE_MODIFIED;
+                break;
+		    default:
+			    notification.kind = SFL_FS_WATCH_NOTIFICATION_INVALID;
+                break;
+        }
+
+        ctx->notify_proc(&notification, ctx->usr);
+
+        if (!fni->NextEntryOffset)
+            break;
+
+        fni = (const FILE_NOTIFY_INFORMATION*)
+            ((uintptr_t)(fni) + fni->NextEntryOffset);
+    }
+}
+
+void sfl_fs_watch_init(SflFsWatchContext *ctx, ProcSflFsWatchNotify *notify, void *usr) {
     ctx->entries = 0;
     ctx->watched_files = 0;
-    SflFsWatchContextInternal *internal = (SflFsWatchContextInternal*)malloc(sizeof(SflFsWatchContextInternal));
-    internal->iocp = 0;
-    ctx->internal = internal;
+    ctx->iocp = 0;
+    ctx->notify_proc = notify;
+    ctx->usr = usr;
 }
 
 /* @todo: for now this only accepts directories */
 void sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path) {
-    SflFsWatchContextInternal *internal = (SflFsWatchContextInternal*)ctx->internal;
-
     /* Add file or directory */
     sfl_fs_watch_sb_push(ctx->watched_files, file_path);
 
@@ -196,32 +340,32 @@ void sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path) {
         SflFsWatchEntry entry;
         entry.handle = dir_handle;
         entry.directory = file_path;
-        entry.extra = (void*)ovl;
         entry.buffer = (unsigned char*)malloc(SFL_FS_WATCH_BUFFER_SIZE);
-        
+        entry.ovl = (OVERLAPPED*)calloc(1, sizeof(OVERLAPPED));
+        entry.ovl->hEvent = CreateEvent(0, TRUE, FALSE, 0);
         sfl_fs_watch_sb_push(ctx->entries, entry);
     }
 
     SflFsWatchEntry *entry = &sfl_fs_watch_sb_last(ctx->entries);
-    sfl_fs_watch_attach_to_iocp(entry->handle, &internal->iocp, (ULONG_PTR)entry, 0);
+    sfl_fs_watch_attach_to_iocp(entry->handle, &ctx->iocp, (ULONG_PTR)entry, 0);
 
     sfl_fs_watch_issue_entry(entry);
 }
 
 
-int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
-    SflFsWatchContextInternal *internal = (SflFsWatchContextInternal*)ctx->internal;
+static int sfl__fs_watch_poll(SflFsWatchContext *ctx, DWORD timeout) {
 POLL_AGAIN:
     DWORD bytes_transferred;
     ULONG_PTR key;
     OVERLAPPED *ovl;
-    HANDLE iocp = internal->iocp;
+    
     DWORD result = sfl_fs_watch_poll_iocp(
-        internal->iocp, 
-        0,
+        ctx->iocp, 
+        timeout,
         &bytes_transferred,
         &key,
         &ovl);
+        
 
     if (result == ERROR_OPERATION_ABORTED) {
         goto POLL_AGAIN;
@@ -231,17 +375,90 @@ POLL_AGAIN:
         return result;
     }
 
-
-    return 0;
+    SflFsWatchEntry *entry = (SflFsWatchEntry*)key;
+    sfl_fs_watch_get_notifications(ctx, entry);
+    int err = sfl_fs_watch_issue_entry(entry);
+    return err;
 }
 
+int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
+    return sfl__fs_watch_poll(ctx, 0);
+}
 
-void sfl_fs_watch_wait(SflFsWatchContext *ctx) {
-
+int sfl_fs_watch_wait(SflFsWatchContext *ctx) {
+    return sfl__fs_watch_poll(ctx, INFINITE);
 }
 
 void sfl_fs_watch_deinit(SflFsWatchContext *ctx) {
 
+}
+
+#elif SFL_FS_WATCH_OS_LINUX
+#include <sys/inotify.h>
+#include <linux/limits.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <poll.h>
+#include <errno.h>
+
+typedef struct _SflFsWatchEntry {
+    const char *file_path;
+    int watch_fd;
+} SflFsWatchEntry;
+
+#define SFL_FS_WATCH_BUFFER_SIZE (sizeof(struct inotify_event) + NAME_MAX + 1)
+
+void sfl_fs_watch_init(SflFsWatchContext *ctx, ProcSflFsWatchNotify *notify, void *usr) {
+    ctx->notify_fd = inotify_init1(IN_NONBLOCK);
+    ctx->notify_proc = notify;
+    ctx->usr = usr;
+    ctx->buffer = malloc(SFL_FS_WATCH_BUFFER_SIZE);
+}
+
+int sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path) {
+    int fd = inotify_add_watch(ctx->notify_fd, file_path, IN_CREATE | IN_DELETE);
+
+    if (fd == -1) {
+        return 0;
+    }
+
+    SflFsWatchEntry entry;
+    entry.file_path = file_path;
+    entry.watch_fd = fd;
+    sfl_fs_watch_sb_push(ctx->entries, entry);
+
+    return 1;
+}
+
+int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
+    unsigned char *buffer = (unsigned char*)ctx->buffer;
+    int length;
+    int offset = 0;
+    int done = 0;
+    int count = 0;
+    while (!done) {
+        length = read(ctx->notify_fd, buffer, SFL_FS_WATCH_BUFFER_SIZE);
+
+        if (length == 0) {
+            done = 1;
+        } else if (length < 0) {
+            if (errno == EAGAIN) {
+                return count > 0 ? SFL_FS_WATCH_RESULT_NONE : SFL_FS_WATCH_RESULT_TIMEOUT;
+            } else {
+                return SFL_FS_WATCH_RESULT_ERROR;
+            }
+        }
+
+        struct inotify_event *event = (struct inotify_event*)buffer + offset;
+        offset += length;
+        count++;
+    }
+
+    return SFL_FS_WATCH_RESULT_NONE;
+}
+
+int sfl_fs_watch_wait(SflFsWatchContext *ctx) {
+    return 0;
 }
 
 

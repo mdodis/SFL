@@ -2,19 +2,27 @@
 #include "sfl_fs_watch.h"
 #include <stdio.h>
 
+PROC_SFL_FS_WATCH_NOTIFY(my_notify) {
+    const char *kind = sfl_fs_watch_notification_kind_to_string(notification->kind);
+    printf("%s\t%s\n", kind, notification->path);
+    return;
+}
+
 int main(int argc, char const *argv[]) {
     SflFsWatchContext context;
-    sfl_fs_watch_init(&context);
-    sfl_fs_watch_add(&context, "./");
+    sfl_fs_watch_init(&context, my_notify, 0);
+    if (!sfl_fs_watch_add(&context, "./")) {
+        return -1;
+    }
 
     while (1) {
-        int er = sfl_fs_watch_poll(&context);
-        if (er == 0) {
-            puts("Something changed");
-        } else if (er == WAIT_TIMEOUT) {
+        int err = sfl_fs_watch_poll(&context);
+        if (err == 0) {
+            puts("Sth changed");
+        } else if (err > 0) {
             continue;
         } else {
-            printf("e: %d\n", er);
+            printf("e: %d\n", err);
         }
         
     }
