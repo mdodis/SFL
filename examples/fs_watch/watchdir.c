@@ -18,7 +18,7 @@ int main(int argc, char const *argv[]) {
     while (1) {
         int err = sfl_fs_watch_poll(&context);
         if (err == 0) {
-            puts("Sth changed");
+            continue;
         } else if (err > 0) {
             continue;
         } else {
