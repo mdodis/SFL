@@ -48,6 +48,7 @@ Michael Dodis (michaeldodisgr@gmail.com)
             - For temp string conversions
 */
 
+
 #ifndef SFL_FS_WATCH_H
 #define SFL_FS_WATCH_H
 #include <wchar.h>
@@ -503,6 +504,10 @@ static void sfl_fs_watch_get_notifications(
     SflFsWatchContext *ctx, 
     SflFsWatchEntry *entry) 
 {
+    /* 
+    @todo: for some reason this still reports multiple times on changes,
+    even if we're just watching one file
+    */
     const FILE_NOTIFY_INFORMATION *fni = (const FILE_NOTIFY_INFORMATION*)
         entry->buffer;
     for (;;) {
