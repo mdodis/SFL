@@ -11,8 +11,17 @@ PROC_SFL_FS_WATCH_NOTIFY(my_notify) {
 int main(int argc, char const *argv[]) {
     SflFsWatchContext context;
     sfl_fs_watch_init(&context, my_notify, 0);
-    if (!sfl_fs_watch_add(&context, "./")) {
+    
+    if (argc < 2) {
+        puts("No files or directories to watch. Exiting...");
         return -1;
+    }
+
+    for (int i = 1; i < argc; ++i) {
+        if (!sfl_fs_watch_add(&context, argv[i])) {
+            printf("Failed to start watch on %s\n", argv[i]);
+            return -1;
+        }
     }
 
     while (1) {

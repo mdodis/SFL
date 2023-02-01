@@ -1,5 +1,4 @@
-/*
-===SFL FS Watch===
+/* sfl_fs_watch.h v0.1
 A filesystem watching utility library for modern Linux and Windows systems
 
 MIT License
@@ -101,6 +100,8 @@ typedef struct {
     /** Notification kind, @see SflFsWatchNotificationKind */
     SflFsWatchNotificationKind kind;
 
+    /** The ID of the watched file or directory */
+    int id;
 } SflFsWatchFileNotification;
 
 /** Event passed to sfl_fs_watch_init() */
@@ -437,6 +438,67 @@ static wchar_t *sfl_fs_watch_wstr_dup(const wchar_t *str, int len) {
     return result;
 }
 
+static int sfl_fs_watch__wstr_ends_with(
+    const wchar_t *str, 
+    const wchar_t *end,
+    size_t end_len) 
+{
+    const wchar_t *s = str;
+    const wchar_t *e = end + end_len;
+    
+    /* Move to end */
+    while (*s++ != 0);
+    
+    s -= 2;
+    e--;
+
+
+    /* Check backwards */
+    while (*e == *s) {
+        if (e == end) {
+            return 1;
+        }
+
+        if (s == end) {
+            return 0;
+        }
+
+        e--;
+        s--;
+    }
+
+    return 0;
+}
+
+static inline int sfl_fs_watch__entry_is_watched_folder(
+    SflFsWatchEntry *entry)
+{
+    return entry->id != -1;
+}
+
+static SflFsWatchEntry *sfl_fs_watch__find_entry_by_file(
+    SflFsWatchEntry *directory_watch,
+    const wchar_t *filename,
+    size_t filename_len)
+{
+    for (SflFsWatchListNode *node = directory_watch->node.next;
+         node != &directory_watch->node;
+         node = node->next)
+    {
+        SflFsWatchEntry *entry = SFL_FS_WATCH_CONTAINER_OF(node, SflFsWatchEntry, node);
+
+        if (sfl_fs_watch__wstr_ends_with(
+            entry->file, 
+            filename, 
+            filename_len)) 
+        {
+            return entry;
+        }
+    }
+
+    return 0;
+}
+
 static void sfl_fs_watch_get_notifications(
     SflFsWatchContext *ctx, 
     SflFsWatchEntry *entry) 
@@ -444,12 +506,30 @@ static void sfl_fs_watch_get_notifications(
     const FILE_NOTIFY_INFORMATION *fni = (const FILE_NOTIFY_INFORMATION*)
         entry->buffer;
     for (;;) {
+        int id = entry->id;
+        if (!sfl_fs_watch__entry_is_watched_folder(entry)) {
+
+            /* 
+            Find the file that matches the filename changed. If no such entry
+            matches, then we don't report that
+            */
+
+            SflFsWatchEntry *file_entry = sfl_fs_watch__find_entry_by_file(
+                entry, 
+                fni->FileName,
+                fni->FileNameLength / sizeof(wchar_t));
+
+            if (file_entry)
+                id = file_entry->id;
+        }
+
         const char *path = sfl_fs_watch_wstr_to_multibyte(
             fni->FileName,
             fni->FileNameLength / sizeof(wchar_t));
 
         SflFsWatchFileNotification notification;
         notification.path = path;
+        notification.id = id;
 
         switch (fni->Action) {
             case FILE_ACTION_ADDED:
@@ -468,7 +548,8 @@ static void sfl_fs_watch_get_notifications(
                 break;
         }
 
-        ctx->notify_proc(&notification, ctx->usr);
+        if (notification.id != -1)
+            ctx->notify_proc(&notification, ctx->usr);
 
         free((void*)path);
         if (!fni->NextEntryOffset)
@@ -526,7 +607,7 @@ static inline wchar_t *sfl_fs_watch_convert_relative_to_absolute(
  * - 1  If directory is a complete substring of child
  * - -1 Otherwise
  */
-static inline int sfl_fs_watch_compare_files_hierarchy(
+static int sfl_fs_watch_compare_files_hierarchy(
     const wchar_t *child, 
     const wchar_t *directory)
 {
