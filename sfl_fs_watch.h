@@ -142,12 +142,14 @@ typedef struct _SflFsWatchContext {
 #elif SFL_FS_WATCH_OS_LINUX
 typedef struct _SflFsWatchEntry SflFsWatchEntry;
 
-typedef struct {
+typedef struct _SflFsWatchContext {
     int notify_fd;
     SflFsWatchEntry *entries;    
     ProcSflFsWatchNotify *notify_proc;
     void *usr;
+    SflFsWatchListNode directories;
     void *buffer;
+    int current_id;
 } SflFsWatchContext;
 
 #endif
@@ -231,6 +233,8 @@ static inline const char *sfl_fs_watch_notification_kind_to_string(
     #define SFL_FS_WATCH_ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 #endif
 
+#include <stddef.h>
+
 #define SFL_FS_WATCH_CONTAINER_OF(ptr, type, member) \
     ((type *)((char *)(ptr) - offsetof(type, member)))
 
@@ -310,10 +314,7 @@ static SflFsWatchEntry *sfl_fs_watch__find_directory_of_entry(
 static void sfl_fs_watch__rm_entry(
     SflFsWatchContext *ctx, 
     SflFsWatchEntry *entry);
-/** Unlink and free directory entry */
-static void sfl_fs_watch__delete_directory_entry(SflFsWatchEntry *entry);
-/** Cancel watch on the specified directory */
-static void sfl_fs_watch__cancel_watch(SflFsWatchEntry *directory);
+
 /** Returns if the node is a file entry and not a directory entry */
 static int sfl_fs_watch__entry_is_child_node(SflFsWatchEntry *entry);
 
@@ -397,6 +398,10 @@ static int sfl_fs_watch_compare_files_hierarchy(
 static int sfl_fs_watch__poll(SflFsWatchContext *ctx, DWORD timeout);
 /** Returns in the specified path is a directory */
 static inline int sfl_fs_watch_is_directory(const wchar_t *path);
+/** Cancel watch on the specified directory */
+static void sfl_fs_watch__cancel_watch(SflFsWatchEntry *directory);
+/** Unlink and free directory entry */
+static void sfl_fs_watch__delete_directory_entry(SflFsWatchEntry *entry);
 
 
 static void sfl_fs_watch_init_entry(
@@ -976,21 +981,58 @@ static inline int sfl_fs_watch_is_directory(const wchar_t *path) {
     return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
 }
 
+static void sfl_fs_watch__delete_directory_entry(SflFsWatchEntry *entry) {
+    sfl_fs_watch__list_node_unlink(&entry->dir_node);
+    sfl_fs_watch__cancel_watch(entry);
+
+    free(entry->ovl);
+    free(entry->buffer);
+    free(entry);
+}
+
 
 #elif SFL_FS_WATCH_OS_LINUX
 #include <sys/inotify.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <linux/limits.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <poll.h>
 #include <errno.h>
+#include <libgen.h>
 
 typedef struct _SflFsWatchEntry {
-    const char *file_path;
-    int watch_fd;
+    const char *file;
+    int handle;
+    int id;
+    SflFsWatchEntryFlags flags;
+    SflFsWatchListNode node;
+    SflFsWatchListNode dir_node;
 } SflFsWatchEntry;
 
 #define SFL_FS_WATCH_BUFFER_SIZE (sizeof(struct inotify_event) + NAME_MAX + 1)
+
+/* Internal Linux functions */
+static void sfl_fs_watch_init_entry(
+    SflFsWatchEntry *entry,
+    const char *file);
+static int sfl_fs_watch_is_directory(const char *path);
+static char *sfl_fs_watch_str_dup(const char *str);
+static void sfl_fs_watch_get_directory_of_file(char *path);
+static int sfl_fs_watch_compare_files_hierarchy(
+    const char *child,
+    const char *directory);
+
+/** Cancel watch on the specified directory */
+static void sfl_fs_watch__cancel_watch(
+    SflFsWatchContext *ctx, 
+    SflFsWatchEntry *directory);
+
+static int sfl_fs_watch__poll(SflFsWatchContext *ctx);
+static void sfl_fs_watch__delete_directory_entry(
+    SflFsWatchContext *ctx,
+    SflFsWatchEntry *entry);
 
 void sfl_fs_watch_init(
     SflFsWatchContext *ctx, 
@@ -1001,32 +1043,227 @@ void sfl_fs_watch_init(
     ctx->notify_proc = notify;
     ctx->usr = usr;
     ctx->buffer = malloc(SFL_FS_WATCH_BUFFER_SIZE);
+    ctx->current_id = 0;
+    sfl_fs_watch_list_node_init(&ctx->directories);
+}
+
+void *sfl_fs_watch_set_usr(SflFsWatchContext *ctx, void *new_usr) {
+    void *tmp = ctx->usr;
+    ctx->usr = new_usr;
+    return tmp;
 }
 
 int sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path) {
-    int fd = inotify_add_watch(
-        ctx->notify_fd, 
-        file_path, 
-        IN_CREATE | IN_DELETE);
 
-    if (fd == -1) {
-        return 0;
+    char *absolute_path = (char*)malloc(PATH_MAX);
+
+    if (!realpath(file_path, absolute_path)) {
+        return -1;
     }
 
-    SflFsWatchEntry entry;
-    entry.file_path = file_path;
-    entry.watch_fd = fd;
-    sfl_fs_watch_sb_push(ctx->entries, entry);
+    int is_directory = sfl_fs_watch_is_directory(absolute_path);
 
-    return 1;
+    SflFsWatchEntry *new_directory = 0;
+
+    /* 
+    Search if the file is part of a directory structure we're already 
+    watching
+    */
+    for (SflFsWatchListNode *q = ctx->directories.next; 
+         q != &ctx->directories;
+         q = q->next)
+    {
+
+        SflFsWatchEntry *entry = SFL_FS_WATCH_CONTAINER_OF(
+            q, 
+            SflFsWatchEntry, 
+            dir_node);
+        
+        int hstatus = sfl_fs_watch_compare_files_hierarchy(
+            absolute_path,
+            entry->file);
+
+        if (hstatus == 1) {
+
+            /* 
+            It's a child of a directory that we are already watching
+            Add it to the list and make sure that the entry will recurse
+            in the directory's substructure
+            */
+            SflFsWatchEntry* new_entry = (SflFsWatchEntry*)
+                malloc(sizeof(SflFsWatchEntry));
+
+            sfl_fs_watch_init_entry(new_entry, absolute_path);
+            new_entry->id = sfl_fs_watch_get_next_id(&ctx->current_id);
+
+            sfl_fs_watch_list_node_append(&entry->node, &new_entry->node);
+            return new_entry->id;
+        } else if (hstatus == 0) {
+            if (entry->id == -1) {
+                entry->id = sfl_fs_watch_get_next_id(&ctx->current_id);
+            }
+            return entry->id;
+        }
+    }
+
+    int ret_id = -1;
+
+    /* If we didn't find a node, then create one */
+    if (!is_directory) {
+        SflFsWatchEntry *new_entry = malloc(sizeof(SflFsWatchEntry));
+        new_directory = malloc(sizeof(SflFsWatchEntry));
+        
+        sfl_fs_watch_init_entry(
+            new_entry, 
+            sfl_fs_watch_str_dup(absolute_path));
+
+        new_entry->id = sfl_fs_watch_get_next_id(&ctx->current_id);
+        
+        sfl_fs_watch_get_directory_of_file(absolute_path);
+        sfl_fs_watch_init_entry(new_directory, absolute_path);
+
+        sfl_fs_watch_list_node_append(&new_directory->node, &new_entry->node);
+        ret_id = new_entry->id;
+    } else {
+        new_directory = malloc(sizeof(SflFsWatchEntry));
+        sfl_fs_watch_init_entry(new_directory, absolute_path);
+        new_directory->id = sfl_fs_watch_get_next_id(&ctx->current_id);
+        ret_id = new_directory->id;
+    }
+
+    int fd = inotify_add_watch(
+        ctx->notify_fd, 
+        new_directory->file, 
+        IN_CREATE | IN_DELETE | IN_MODIFY);
+
+    if (fd == -1) {
+        return -1;
+    }
+
+    new_directory->handle = fd;
+    sfl_fs_watch_list_node_append(&ctx->directories, &new_directory->dir_node);
+
+    return ret_id;
+}
+
+void sfl_fs_watch_rm_id(SflFsWatchContext *ctx, int id) {
+    SflFsWatchEntry *entry = sfl_fs_watch__find_entry_by_id(ctx, id);
+    if (!entry)
+        return;
+
+    sfl_fs_watch__rm_entry(ctx, entry);
 }
 
 int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
+    int fl = fcntl(ctx->notify_fd, F_GETFL);
+    fl |= O_NONBLOCK;
+    fcntl(ctx->notify_fd, F_SETFL, fl);
+    return sfl_fs_watch__poll(ctx);
+}
+
+int sfl_fs_watch_wait(SflFsWatchContext *ctx) {
+    int fl = fcntl(ctx->notify_fd, F_GETFL);
+    fl &= ~(O_NONBLOCK);
+    fcntl(ctx->notify_fd, F_SETFL, fl);
+    return sfl_fs_watch__poll(ctx);
+}
+
+/* Internal Linux function implementations */
+
+static void sfl_fs_watch_init_entry(
+    SflFsWatchEntry *entry,
+    const char *file) 
+{
+    entry->file = file;
+    entry->id = -1;
+    entry->flags = 0;
+    sfl_fs_watch_list_node_init(&entry->node);
+    sfl_fs_watch_list_node_init(&entry->dir_node);
+}
+
+static int sfl_fs_watch_is_directory(const char *path) {
+    struct stat statbuf;
+    if (stat(path, &statbuf)) {
+        return -1;
+    }
+
+    return S_ISDIR(statbuf.st_mode);
+}
+
+static char *sfl_fs_watch_str_dup(const char *str) {
+    size_t len = strlen(str);
+    char *result = (char*)malloc(len + 1);
+    for (int i = 0; i < len; ++i) {
+        result[i] = str[i];
+    }
+    result[len] = 0;
+    return result;
+}
+
+static void sfl_fs_watch_get_directory_of_file(char *path) {
+    dirname(path);
+}
+
+static int sfl_fs_watch_compare_files_hierarchy(
+    const char *child,
+    const char *directory)
+{
+    size_t directory_len = strlen(directory);
+    size_t child_len = strlen(child);
+    if (directory_len > child_len) {
+        return -1;
+    }
+
+    for (int i = 0; i < directory_len; ++i) {
+        if (directory[i] != child[i]) {
+            return -1;
+        }
+    }
+
+    return (directory_len == child_len) ? 0 : 1;
+}
+
+static void sfl_fs_watch__rm_entry(
+    SflFsWatchContext *ctx, 
+    SflFsWatchEntry *entry)
+{
+    SflFsWatchEntry *directory = sfl_fs_watch__find_directory_of_entry(entry);
+
+    if (sfl_fs_watch__entry_is_child_node(entry)) {
+        sfl_fs_watch__list_node_unlink(&entry->node);
+
+        free(entry);
+    } else {
+        /* If it's just a directory, then release the id */
+        entry->id = -1;
+    }
+
+    /* 
+    if it is a watched directory, then remove it or mark it for deletion if it's
+    being processed
+    */
+    if (sfl_fs_watch__list_node_is_empty(&directory->node) && 
+        !sfl_fs_watch__entry_is_watched_folder(directory)) 
+    {
+        if (!(directory->flags & SFL_FS_WATCH_ENTRY_FLAG_PROCESSING)) {
+            sfl_fs_watch__delete_directory_entry(ctx, directory);
+        } else {
+            directory->flags |= SFL_FS_WATCH_ENTRY_FLAG_REQUESTED_REMOVAL;
+        }
+    }
+}
+
+static int sfl_fs_watch__poll(SflFsWatchContext *ctx) {
+    if (sfl_fs_watch__list_node_is_empty(&ctx->directories)) {
+        return SFL_FS_WATCH_RESULT_NO_MORE_DIRECTORIES_TO_WATCH;
+    }
+
     unsigned char *buffer = (unsigned char*)ctx->buffer;
     int length;
     int offset = 0;
     int done = 0;
     int count = 0;
+
     while (!done) {
         length = read(ctx->notify_fd, buffer, SFL_FS_WATCH_BUFFER_SIZE);
 
@@ -1043,6 +1280,17 @@ int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
         }
 
         struct inotify_event *event = (struct inotify_event*)buffer + offset;
+
+        char *filename = malloc(event->len + 1);
+        memcpy(filename, event->name, event->len);
+        filename[event->len] = 0;
+
+        SflFsWatchFileNotification notification;
+        notification.path = filename;
+
+        ctx->notify_proc(ctx, &notification, ctx->usr);
+        
+
         offset += length;
         count++;
     }
@@ -1050,8 +1298,22 @@ int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
     return SFL_FS_WATCH_RESULT_NONE;
 }
 
-int sfl_fs_watch_wait(SflFsWatchContext *ctx) {
-    return 0;
+static void sfl_fs_watch__delete_directory_entry(
+    SflFsWatchContext *ctx,
+    SflFsWatchEntry *entry) 
+{
+    sfl_fs_watch__list_node_unlink(&entry->dir_node);
+    sfl_fs_watch__cancel_watch(ctx, entry);
+
+    free((void*)entry->file);
+    free(entry);
+}
+
+static void sfl_fs_watch__cancel_watch(
+    SflFsWatchContext *ctx,
+    SflFsWatchEntry *directory) 
+{
+    inotify_rm_watch(ctx->notify_fd, directory->handle);
 }
 
 /* Linux */
@@ -1154,18 +1416,10 @@ static SflFsWatchEntry *sfl_fs_watch__find_directory_of_entry(
     return qn;
 }
 
-static void sfl_fs_watch__delete_directory_entry(SflFsWatchEntry *entry) {
-    sfl_fs_watch__list_node_unlink(&entry->dir_node);
-    sfl_fs_watch__cancel_watch(entry);
-
-    free(entry->ovl);
-    free(entry->buffer);
-    free(entry);
-}
-
 static int sfl_fs_watch__entry_is_child_node(SflFsWatchEntry *entry) {
     return sfl_fs_watch__list_node_is_empty(&entry->dir_node);
 }
+
 
 #endif
 
