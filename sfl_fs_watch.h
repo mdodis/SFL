@@ -421,7 +421,7 @@ static void sfl_fs_watch_init_entry(
  * @param entry The watch entry (always directory)
  * @return 1 if the watch should be re-issued, 0 otherwise
  */
-static int sfl_fs_watch_get_notifications(
+static int sfl_fs_watch__get_notifications(
     SflFsWatchContext *ctx, 
     SflFsWatchEntry *entry) 
 {
@@ -429,6 +429,9 @@ static int sfl_fs_watch_get_notifications(
         entry->buffer;
     for (;;) {
         int id = entry->id;
+        wchar_t *filename = 0;
+        size_t filename_len = 0;
+
         if (!sfl_fs_watch__entry_is_watched_folder(entry)) {
 
             /* 
@@ -445,11 +448,22 @@ static int sfl_fs_watch_get_notifications(
                 id = file_entry->id;
         }
 
-        /* @todo: report absolute path instead of relative */
+        {
+            size_t a_len = wcslen(entry->file);
+            size_t b_len = fni->FileNameLength / sizeof(wchar_t);
+            filename_len = a_len + b_len + 1;
+            const wchar_t *a = entry->file;
+            const wchar_t *b = fni->FileName;
+            filename = (wchar_t*)malloc(sizeof(wchar_t) * (filename_len + 1));
+            memcpy(filename + 0,         a, sizeof(wchar_t) * a_len);
+            filename[a_len] = '\\';
+            memcpy(filename + a_len + 1, b, sizeof(wchar_t) * b_len);
+            filename[filename_len] = 0;
+        }
 
         const char *path = sfl_fs_watch_wstr_to_multibyte(
-            fni->FileName,
-            fni->FileNameLength / sizeof(wchar_t));
+            filename,
+            filename_len);
 
         SflFsWatchNotification notification;
         notification.path = path;
@@ -962,7 +976,7 @@ POLL_AGAIN:
     SflFsWatchEntry *entry = (SflFsWatchEntry*)key;
     entry->flags |= SFL_FS_WATCH_ENTRY_FLAG_PROCESSING;
 
-    int resume = sfl_fs_watch_get_notifications(ctx, entry);
+    int resume = sfl_fs_watch__get_notifications(ctx, entry);
     if (resume) {
         int err = sfl_fs_watch_issue_entry(entry);
         return err;
