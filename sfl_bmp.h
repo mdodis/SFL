@@ -1,5 +1,12 @@
-/*
-===SFL BMP===
+/* sfl_bmp.h v0.1
+A utility library for reading and writing BMP files for all recorded versions of
+the format. It's mainly my personal case study on maintaining a relatively old
+file format, and the difficulties that come with that.
+
+NOTICE
+If you just want to load and display image files for your application, then you
+are probably better off with stb_image.h
+
 MIT License
 
 Copyright (c) 2023 Michael Dodis

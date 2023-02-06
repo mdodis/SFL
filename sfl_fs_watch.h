@@ -1,4 +1,4 @@
-/* sfl_fs_watch.h v0.1
+/* sfl_fs_watch.h v0.2
 A filesystem watching utility library for modern Linux and Windows systems
 
 MIT License
@@ -236,35 +236,6 @@ static inline const char *sfl_fs_watch_notification_kind_to_string(
     ((type *)((char *)(ptr) - offsetof(type, member)))
 
 #include <stdlib.h>
-/* Stretchy buffer implementation */
-#define sfl_fs_watch_sb_free(x)    ((x) ? free(sfl_fs_watch_sb_raw(x)), 0 : 0)
-#define sfl_fs_watch_sb_add(x, n)  (sfl_fs_watch_sb_maybegrow(x, n), sfl_fs_watch_sb_n(x) += (n), &(x)[sfl_fs_watch_sb_n(x)-(n)])
-#define sfl_fs_watch_sb_last(x)    ((x)[sfl_fs_watch_sb_n(x)-1])
-#define sfl_fs_watch_sb_push(x, v) (sfl_fs_watch_sb_maybegrow(x,1), (x)[sfl_fs_watch_sb_n(x)++] = (v))
-#define sfl_fs_watch_sb_count(x)   ((x) ? sfl_fs_watch_sb_n(x) : 0)
-
-#define sfl_fs_watch_sb_raw(x)          ((int *) (void *) (x) - 2)
-#define sfl_fs_watch_sb_m(x)            sfl_fs_watch_sb_raw(x)[0]
-#define sfl_fs_watch_sb_n(x)            sfl_fs_watch_sb_raw(x)[1]
-#define sfl_fs_watch_sb_needsgrow(x, n) ((x) == 0 || sfl_fs_watch_sb_n(x) + (n) >= sfl_fs_watch_sb_m(x))
-#define sfl_fs_watch_sb_maybegrow(x, n) (sfl_fs_watch_sb_needsgrow(x,(n)) ? sfl_fs_watch_sb_grow(x, n) : 0)
-#define sfl_fs_watch_sb_grow(x, n)      (*((void **)&(x)) = sfl_fs_watch_sb_growf((x), (n), sizeof(*(x))))
-
-static void *sfl_fs_watch_sb_growf(void *arr, int increment, int itemsize)
-{
-   int dbl_cur = arr ? 2 * sfl_fs_watch_sb_m(arr) : 0;
-   int min_needed = sfl_fs_watch_sb_count(arr) + increment;
-   int m = dbl_cur > min_needed ? dbl_cur : min_needed;
-   int *p = (int *) realloc(arr ? sfl_fs_watch_sb_raw(arr) : 0, itemsize * m + sizeof(int)*2);
-   if (p) {
-      if (!arr)
-         p[1] = 0;
-      p[0] = m;
-      return p+2;
-   } else {
-      return (void *) (2*sizeof(int)); // try to force a NULL pointer exception later
-   }
-}
 
 /* List functions */
 static void sfl_fs_watch_list_node_init(SflFsWatchListNode *node);
@@ -330,7 +301,7 @@ typedef struct _SflFsWatchEntry {
     int id;
     SflFsWatchListNode node;
     SflFsWatchListNode dir_node;
-    SflFsWatchEntryFlags flags;
+    int flags;
 } SflFsWatchEntry;
 
 /** Buffer size for notification data */
@@ -352,13 +323,13 @@ static DWORD sfl_fs_watch_poll_iocp(
     ULONG_PTR *key, 
     OVERLAPPED **ovl);
 /** Issue IO call to ReadDirectoryChangesW for this entry */
-static int sfl_fs_watch_issue_entry(SflFsWatchEntry *entry);
+static SflFsWatchResult sfl_fs_watch_issue_entry(SflFsWatchEntry *entry);
 /** Duplicate wide string */
 static wchar_t *sfl_fs_watch_wstr_dup(const wchar_t *str, int len);
 /** Convert string from utf-16 to utf-8 */
 static const char *sfl_fs_watch_wstr_to_multibyte(
     const wchar_t *wstr, 
-    int wstr_len);
+    size_t wstr_len);
 /** Convert string from utf-8 to utf-16 */
 static wchar_t *sfl_fs_watch_multibyte_to_wstr(
     const char *multibyte, 
@@ -392,7 +363,9 @@ static int sfl_fs_watch_compare_files_hierarchy(
     const wchar_t *child, 
     const wchar_t *directory);
 /** Poll the IO completion port, set timeout = INFINITE for blocking wait */
-static int sfl_fs_watch__poll(SflFsWatchContext *ctx, DWORD timeout);
+static SflFsWatchResult sfl_fs_watch__poll(
+    SflFsWatchContext *ctx, 
+    DWORD timeout);
 /** Returns in the specified path is a directory */
 static inline int sfl_fs_watch_is_directory(const wchar_t *path);
 /** Cancel watch on the specified directory */
@@ -410,7 +383,7 @@ static void sfl_fs_watch_init_entry(
     entry->ovl = 0;
     entry->file = file;
     entry->id = -1;
-    entry->flags = 0;
+    entry->flags = (SflFsWatchEntryFlags)0;
     sfl_fs_watch_list_node_init(&entry->node);
     sfl_fs_watch_list_node_init(&entry->dir_node);
 }
@@ -594,8 +567,8 @@ int sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path) {
 
     /* If we didn't find a node, then create one */
     if (!is_directory) {
-        SflFsWatchEntry *new_entry = malloc(sizeof(SflFsWatchEntry));
-        new_directory = malloc(sizeof(SflFsWatchEntry));
+        SflFsWatchEntry *new_entry = (SflFsWatchEntry*)malloc(sizeof(SflFsWatchEntry));
+        new_directory = (SflFsWatchEntry*)malloc(sizeof(SflFsWatchEntry));
         
         sfl_fs_watch_init_entry(new_entry, sfl_fs_watch_wstr_dup(
             file_pathw, 
@@ -609,7 +582,7 @@ int sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path) {
         sfl_fs_watch_list_node_append(&new_directory->node, &new_entry->node);
         ret_id = new_entry->id;
     } else {
-        new_directory = malloc(sizeof(SflFsWatchEntry));
+        new_directory = (SflFsWatchEntry*)malloc(sizeof(SflFsWatchEntry));
         sfl_fs_watch_init_entry(new_directory, file_pathw);
         new_directory->id = sfl_fs_watch_get_next_id(&ctx->current_id);
         ret_id = new_directory->id;
@@ -630,7 +603,7 @@ int sfl_fs_watch_add(SflFsWatchContext *ctx, const char *file_path) {
     ovl->hEvent = CreateEvent(0, TRUE, FALSE, 0);
 
     new_directory->handle = dir_handle;
-    new_directory->buffer = malloc(SFL_FS_WATCH_BUFFER_SIZE);
+    new_directory->buffer = (unsigned char*)malloc(SFL_FS_WATCH_BUFFER_SIZE);
     new_directory->ovl = ovl;
     sfl_fs_watch_attach_to_iocp(
         new_directory->handle, 
@@ -652,7 +625,7 @@ void sfl_fs_watch_rm_id(SflFsWatchContext *ctx, int id) {
     sfl_fs_watch__rm_entry(ctx, entry);
 }
 
-int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
+SflFsWatchResult sfl_fs_watch_poll(SflFsWatchContext *ctx) {
     return sfl_fs_watch__poll(ctx, 0);
 }
 
@@ -745,9 +718,9 @@ static DWORD sfl_fs_watch_poll_iocp(
     return err;
 }
 
-static int sfl_fs_watch_issue_entry(SflFsWatchEntry *entry) {
+static SflFsWatchResult sfl_fs_watch_issue_entry(SflFsWatchEntry *entry) {
     if (entry->handle == INVALID_HANDLE_VALUE) {
-        return -1;
+        return SFL_FS_WATCH_RESULT_ERROR;
     }
     HANDLE dir_handle = (HANDLE)entry->handle;
 
@@ -766,11 +739,11 @@ static int sfl_fs_watch_issue_entry(SflFsWatchEntry *entry) {
         &undefined,
         (OVERLAPPED*)entry->ovl,
         0);
-    return 0;
+    return SFL_FS_WATCH_RESULT_NONE;
 }
 
 static wchar_t *sfl_fs_watch_wstr_dup(const wchar_t *str, int len) {
-    wchar_t *result = malloc(sizeof(wchar_t) * (len + 1));
+    wchar_t *result = (wchar_t*)malloc(sizeof(wchar_t) * (len + 1));
     for (int i = 0; i < len; ++i) {
         result[i] = str[i];
     }
@@ -780,7 +753,7 @@ static wchar_t *sfl_fs_watch_wstr_dup(const wchar_t *str, int len) {
 
 static const char *sfl_fs_watch_wstr_to_multibyte(
     const wchar_t *wstr,
-    int wstr_len) 
+    size_t wstr_len) 
 {
     if (wstr_len == 0)
         wstr_len = (int)wcslen(wstr);
@@ -789,16 +762,16 @@ static const char *sfl_fs_watch_wstr_to_multibyte(
         CP_UTF8,
         WC_ERR_INVALID_CHARS,
         wstr,
-        wstr_len,
+        (int)wstr_len,
         0, 0, 0, 0);
     
-    char *result = malloc(num_bytes + 1);
+    char *result = (char*)malloc(num_bytes + 1);
 
     WideCharToMultiByte(
         CP_UTF8,
         WC_ERR_INVALID_CHARS,
         wstr,
-        wstr_len,
+        (int)wstr_len,
         result,
         num_bytes,
         0,
@@ -824,7 +797,7 @@ static wchar_t *sfl_fs_watch_multibyte_to_wstr(
         0,
         0);
 
-    wchar_t *result = malloc(sizeof(wchar_t) * (*wstr_len + 1));
+    wchar_t *result = (wchar_t*)malloc(sizeof(wchar_t) * (*wstr_len + 1));
     
     MultiByteToWideChar(
         CP_UTF8,
@@ -851,7 +824,6 @@ static int sfl_fs_watch__wstr_ends_with(
     
     s -= 2;
     e--;
-
 
     /* Check backwards */
     while (*e == *s) {
@@ -915,7 +887,7 @@ static wchar_t *sfl_fs_watch_convert_relative_to_absolute(
         0, 
         0);
     
-    wchar_t *result = malloc(sizeof(wchar_t) * (*result_len));
+    wchar_t *result = (wchar_t*)malloc(sizeof(wchar_t) * (*result_len));
 
     GetFullPathNameW(
         path,
@@ -947,7 +919,7 @@ static int sfl_fs_watch_compare_files_hierarchy(
 }
 
 
-static int sfl_fs_watch__poll(SflFsWatchContext *ctx, DWORD timeout) {
+static SflFsWatchResult sfl_fs_watch__poll(SflFsWatchContext *ctx, DWORD timeout) {
 
     if (sfl_fs_watch__list_node_is_empty(&ctx->directories)) {
         return SFL_FS_WATCH_RESULT_NO_MORE_DIRECTORIES_TO_WATCH;
@@ -970,7 +942,11 @@ POLL_AGAIN:
     }
 
     if (result != ERROR_SUCCESS) {
-        return result;
+        if (result == WAIT_TIMEOUT) {
+            return SFL_FS_WATCH_RESULT_TIMEOUT;
+        } else {
+            return SFL_FS_WATCH_RESULT_ERROR;
+        }
     }
 
     SflFsWatchEntry *entry = (SflFsWatchEntry*)key;
@@ -978,8 +954,7 @@ POLL_AGAIN:
 
     int resume = sfl_fs_watch__get_notifications(ctx, entry);
     if (resume) {
-        int err = sfl_fs_watch_issue_entry(entry);
-        return err;
+        return sfl_fs_watch_issue_entry(entry);
     }
     return SFL_FS_WATCH_RESULT_NONE;
 }
@@ -1179,7 +1154,7 @@ void sfl_fs_watch_rm_id(SflFsWatchContext *ctx, int id) {
     sfl_fs_watch__rm_entry(ctx, entry);
 }
 
-int sfl_fs_watch_poll(SflFsWatchContext *ctx) {
+SflFsWatchResult sfl_fs_watch_poll(SflFsWatchContext *ctx) {
     int fl = fcntl(ctx->notify_fd, F_GETFL);
     fl |= O_NONBLOCK;
     fcntl(ctx->notify_fd, F_SETFL, fl);
