@@ -112,6 +112,7 @@ REFERENCES
 - https://archive.org/details/OS2BBS
 - https://www.fileformat.info/format/os2bmp/egff.htm
 - https://en.wikipedia.org/wiki/BMP_file_format
+- https://entropymine.com/jason/bmpsuite/bmpsuite/html/bmpsuite.html
 
 */
 #ifndef SFL_BMP_H
@@ -159,11 +160,14 @@ typedef float    SflBmpReal;
 #endif
 
 #if !SFL_BMP_CUSTOM_PIXEL_FORMATS
-#define SFL_BMP_PIXEL_FORMAT_B8G8R8A8 1
-#define SFL_BMP_PIXEL_FORMAT_B8G8R8   2
-#define SFL_BMP_PIXEL_FORMAT_B5G6R5   3
-#define SFL_BMP_PIXEL_FORMAT_R8G8B8A8 4
-#define SFL_BMP_PIXEL_FORMAT_B8G8R8X8 5
+#define SFL_BMP_PIXEL_FORMAT_INVALID      -1
+#define SFL_BMP_PIXEL_FORMAT_UNRECOGNIZED 0
+#define SFL_BMP_PIXEL_FORMAT_B8G8R8A8     1
+#define SFL_BMP_PIXEL_FORMAT_B8G8R8       2
+#define SFL_BMP_PIXEL_FORMAT_B5G6R5       3
+#define SFL_BMP_PIXEL_FORMAT_R8G8B8A8     4
+#define SFL_BMP_PIXEL_FORMAT_B8G8R8X8     5
+#define SFL_BMP_PIXEL_FORMAT_B5G5R5X1     6
 #endif
 
 typedef enum {
@@ -303,7 +307,9 @@ extern int sfl_bmp_read_context_decode(
     SflBmpDesc *desc);
 
 extern const char *sfl_bmp_describe_pixel_format(int format);
-
+extern const char *sfl_bmp_describe_hdr_id(SflBmpHdrID id);
+extern const char *sfl_bmp_describe_nfo_id(SflBmpNfoID id);
+extern const char *sfl_bmp_describe_compression(SflBmpCompression compression);
 /**
  * STDIO Implementation 
  */
@@ -374,7 +380,11 @@ typedef struct {
  * BITMAPINFOHEADER (Windows NT, 3.1x or later)
  */
 typedef struct {
-    SflBmpCoreHeader core;
+    SflBmpU32 size;
+    SflBmpU16 width;
+    SflBmpU16 height;
+    SflBmpU16 planes;
+    SflBmpU16 bpp;
     SflBmpU32 compression;
     SflBmpU32 raw_size;
     SflBmpI32 horizontal_resolution;
@@ -580,8 +590,17 @@ static SflBmpI32 sfl_bmp_iabs(SflBmpI32 value) {
 }
 
 const char *sfl_bmp_describe_pixel_format(int format) {
-    const char *desc_string = "Invalid Format";
+    const char *desc_string = "Invalid format enumeration";
     switch (format) {
+
+        case SFL_BMP_PIXEL_FORMAT_INVALID: {
+            desc_string = "Invalid";
+        } break;
+
+        case SFL_BMP_PIXEL_FORMAT_UNRECOGNIZED: {
+            desc_string = "Unrecognized";
+        } break;
+
         case SFL_BMP_PIXEL_FORMAT_B8G8R8A8: {
             desc_string = "B8G8R8A8";
         } break;
@@ -601,11 +620,62 @@ const char *sfl_bmp_describe_pixel_format(int format) {
         case SFL_BMP_PIXEL_FORMAT_B8G8R8X8: {
             desc_string = "B8G8R8X8";
         } break;
+
+        case SFL_BMP_PIXEL_FORMAT_B5G5R5X1: {
+            desc_string = "B5G5R5X1";
+        } break;
+
         default: break;
     }
 
     return desc_string;
 }
+
+const char *sfl_bmp_describe_hdr_id(SflBmpHdrID id) {
+    const char *result = "Invalid";
+    switch (id) {
+        case SFL_BMP_HDR_ID_NA: result = "N/A"; break;
+        case SFL_BMP_HDR_ID_BM: result = "BM (Windows 3.1x)"; break;
+        case SFL_BMP_HDR_ID_BA: result = "BA (OS/2 struct bitmap array)"; break;
+        case SFL_BMP_HDR_ID_CI: result = "CI (OS/2 struct color icon)"; break;
+        case SFL_BMP_HDR_ID_CP: result = "CP (OS/2 const color pointer)"; break;
+        case SFL_BMP_HDR_ID_IC: result = "IC (OS/2 struct icon)"; break;
+        case SFL_BMP_HDR_ID_PT: result = "PT (OS/2 pointer)"; break;
+        default: break;
+    }
+    return result;
+}
+
+const char *sfl_bmp_describe_nfo_id(SflBmpNfoID id) {
+    const char *result = "Invalid";
+    switch (id) {
+
+        case SFL_BMP_NFO_ID_NA:      result = "N/A"; break;
+        case SFL_BMP_NFO_ID_CORE:    result = "BITMAPCOREHEADER (Windows 2.0)"; break;
+        case SFL_BMP_NFO_ID_OS22_V1: result = "OS22XBITMAPHEADER (OS/2 1.x)"; break;
+        case SFL_BMP_NFO_ID_OS22_V2: result = "BITMAPCOREHEADER2 (OS/2 2.x)"; break;
+        case SFL_BMP_NFO_ID_V1:      result = "BITMAPINFOHEADER (Windows NT)"; break;
+        case SFL_BMP_NFO_ID_V2:      result = "BITMAPV2INFOHEADER (ADOBE)"; break;
+        case SFL_BMP_NFO_ID_V3:      result = "BITMAPV3INFOHEADER (ADOBE)"; break;
+        case SFL_BMP_NFO_ID_V4:      result = "BITMAPV4HEADER (Windows NT 4, 95)"; break;
+        case SFL_BMP_NFO_ID_V5:      result = "BITMAPV5HEADER (Windows NT 5, 98)"; break;
+        default: break;
+    }
+    return result;
+}
+
+const char *sfl_bmp_describe_compression(SflBmpCompression compression) {
+    const char *result = "Invalid";
+    switch (compression) {
+        case SFL_BMP_COMPRESSION_NONE:      result = "None"; break;
+        case SFL_BMP_COMPRESSION_RLE8:      result = "RLE (8 bits)"; break;
+        case SFL_BMP_COMPRESSION_RLE4:      result = "RLE (4 bits)"; break;
+        case SFL_BMP_COMPRESSION_BITFIELDS: result = "None"; break;
+        default: break;
+    }
+    return result;
+}
+
 
 void sfl_bmp_read_context_init(
     SflBmpReadContext *ctx, 
@@ -669,38 +739,128 @@ static int sfl_bmp_get_nfo_id(SflBmpU32 info_size) {
     }
 }
 
+static int sfl_bmp__bitmasks_from_pixel_format(
+    int format,
+    SflBmpU32 *masks)
+{
+    int ok = 1;
+    switch (format) {
+        case SFL_BMP_PIXEL_FORMAT_B8G8R8A8: {
+            masks[0] = 0x00ff0000;
+            masks[1] = 0x0000ff00;
+            masks[2] = 0x000000ff;
+            masks[3] = 0xff000000;
+        } break;
+
+        case SFL_BMP_PIXEL_FORMAT_B8G8R8: {
+            masks[0] = 0x00ff0000;
+            masks[1] = 0x0000ff00;
+            masks[2] = 0x000000ff;
+            masks[3] = 0;
+        } break;
+
+        case SFL_BMP_PIXEL_FORMAT_B5G6R5: {
+            masks[0] = 0b1111100000000000;
+            masks[1] = 0b0000011111100000;
+            masks[2] = 0b0000000000011111;
+            masks[3] = 0;
+        } break;
+
+        case SFL_BMP_PIXEL_FORMAT_B5G5R5X1: {
+            masks[0] = 0b0111110000000000;
+            masks[1] = 0b0000001111100000;
+            masks[2] = 0b0000000000011111;
+            masks[3] = 0;
+        } break;
+
+        case SFL_BMP_PIXEL_FORMAT_R8G8B8A8: {
+            masks[0] = 0xff000000;
+            masks[1] = 0x00ff0000;
+            masks[2] = 0x0000ff00;
+            masks[3] = 0x000000ff;
+        } break;
+
+        case SFL_BMP_PIXEL_FORMAT_B8G8R8X8: {
+            masks[0] = 0x00ff0000;
+            masks[1] = 0x0000ff00;
+            masks[2] = 0x000000ff;
+            masks[3] = 0x00000000;
+        } break;
+
+        case SFL_BMP_PIXEL_FORMAT_UNRECOGNIZED: {} break;
+
+        default: {
+            ok = 0;
+        } break;
+    }
+
+    return ok;
+}
+
+static int sfl_bmp_decide_pixel_format_from_bitmasks(SflBmpU32 *masks) {
+    SflBmpU32 test_mask[4];
+#define SFL_BMP__TEST_MASKS(m1, m2) ( \
+    (m1[0] == m2[0]) &&               \
+    (m1[1] == m2[1]) &&               \
+    (m1[2] == m2[2]) &&               \
+    (m1[3] == m2[3]))
+
+#define SFL_BMP__TEST_FORMAT(format, test_mask, mask) do {                \
+        int __r = sfl_bmp__bitmasks_from_pixel_format(format, test_mask); \
+        if (!__r) return 0;                                               \
+        if (SFL_BMP__TEST_MASKS(test_mask, mask)) return 1;               \
+    } while(0)
+
+
+    SFL_BMP__TEST_FORMAT(SFL_BMP_PIXEL_FORMAT_B8G8R8A8, test_mask, masks);
+    SFL_BMP__TEST_FORMAT(SFL_BMP_PIXEL_FORMAT_B8G8R8,   test_mask, masks);
+    SFL_BMP__TEST_FORMAT(SFL_BMP_PIXEL_FORMAT_B5G6R5,   test_mask, masks);
+    SFL_BMP__TEST_FORMAT(SFL_BMP_PIXEL_FORMAT_R8G8B8A8, test_mask, masks);
+    SFL_BMP__TEST_FORMAT(SFL_BMP_PIXEL_FORMAT_B8G8R8X8, test_mask, masks);
+    SFL_BMP__TEST_FORMAT(SFL_BMP_PIXEL_FORMAT_B5G5R5X1, test_mask, masks);
+
+#undef SFL_BMP__TEST
+#undef SFL_BMP__TEST_MASKS
+    return SFL_BMP_PIXEL_FORMAT_UNRECOGNIZED;
+}
+
 int sfl_bmp_read_context_probe(
     SflBmpReadContext *ctx,
     SflBmpDesc *desc)
 {
+    int rc = 0;
     /* Read in file header and determine file type */
     SflBmpFileHeader file_header;
     if (!SFL_BMP_READ_STRUCT(SflBmpFileHeader, ctx, &file_header)) {
-        goto EXIT_ERROR;
+        goto EXIT_PROC;
     }
 
     SflBmpHdrID hdr_id = sfl_bmp_get_hdr_id(file_header.hdr);
     if (hdr_id == SFL_BMP_HDR_ID_NA) {
-        goto EXIT_ERROR;
+        goto EXIT_PROC;
     }
 
     /* Read in  header size and get info header kind */
     SflBmpU32 info_header_size;
     if (!SFL_BMP_READ(ctx, &info_header_size, sizeof(info_header_size))) {
-        goto EXIT_ERROR;
+        goto EXIT_PROC;
     }
 
     if (SFL_BMP_SEEK(ctx, -((long)sizeof(info_header_size)), SFL_BMP_IO_CUR)) {
-        goto EXIT_ERROR;
+        goto EXIT_PROC;
     }
 
     int nfo_id = sfl_bmp_get_nfo_id(info_header_size);
 
     /* Set initial values for descriptor */
+    desc->data = 0;
     desc->attributes = 0;
     desc->offset = file_header.offset;
     desc->table_offset = sizeof(SflBmpFileHeader) + info_header_size;
-    
+    desc->file_header_id = hdr_id;
+    desc->info_header_id = nfo_id;
+
+    SflBmpU16 bpp = 0;
     switch (nfo_id) {
         case SFL_BMP_NFO_ID_CORE: {
             /* 
@@ -719,7 +879,31 @@ int sfl_bmp_read_context_probe(
         } break;
 
         case SFL_BMP_NFO_ID_V1: {
+            SflBmpInfoHeader040 info_header;
+            if (!SFL_BMP_READ_STRUCT(SflBmpInfoHeader040, ctx, &info_header)) {
+                goto EXIT_PROC;
+            }
+            desc->width = info_header.width;
+            desc->height = info_header.height;
 
+            /* v1 doesn't support alpha masks */
+            desc->mask[3] = 0;
+            
+            /* 
+            msdocs on BITMAPINFOHEADER say that these are the only 
+            possible values 
+            */
+            if (info_header.compression == SFL_BMP_COMPRESSION_BITFIELDS) {
+                /*
+                > Palette field contains three 4 byte color masks that specify 
+                > the red, green, and blue components
+                From msdocs on BITMAPINFOHEADER
+                */
+            } else if (info_header.compression != SFL_BMP_COMPRESSION_NONE) {
+                goto EXIT_PROC;
+            }
+
+            desc->compression = info_header.compression;
         } break;
 
         case SFL_BMP_NFO_ID_V2: {
@@ -737,13 +921,13 @@ int sfl_bmp_read_context_probe(
         case SFL_BMP_NFO_ID_V5: {
             SflBmpInfoHeader124 info_header;
             if (!SFL_BMP_READ_STRUCT(SflBmpInfoHeader124, ctx, &info_header)) {
-                goto EXIT_ERROR;
+                goto EXIT_PROC;
             }
             desc->width = info_header.width;
             desc->height = sfl_bmp_iabs(info_header.height);
             
-            if (info_header.height < 0) {
-                desc->attributes &= SFL_BMP_ATTRIBUTE_FLIPPED;
+            if (info_header.height > 0) {
+                desc->attributes |= SFL_BMP_ATTRIBUTE_FLIPPED;
             }
 
             desc->mask[0] = info_header.red_mask;
@@ -751,17 +935,83 @@ int sfl_bmp_read_context_probe(
             desc->mask[2] = info_header.blue_mask;
             desc->mask[3] = info_header.alpha_mask;
             
-
+            desc->compression = (SflBmpCompression)info_header.compression;
+            bpp = info_header.bpp;
         } break;
 
         case SFL_BMP_NFO_ID_NA:
-        default: break;
+        default: 
+        break;
     }
 
-    // @todo: fill out rest of desc here
+    desc->pitch = (SflBmpU32)SFL_BMP_CEILF(
+        (bpp * desc->width) / 32.f) * 4;
 
-EXIT_ERROR:
-    return 0;
+    desc->size = desc->pitch * desc->height;
+
+    /* If bits per pixel is <= 8, then the bitmap is always palettized */
+    switch (bpp) {
+        case  1: 
+        case  4:
+        case  8: {
+            desc->attributes |= SFL_BMP_ATTRIBUTE_PALETTIZED;
+
+            if (desc->compression == SFL_BMP_COMPRESSION_RLE4) {
+                if (!bpp == 4) {
+                    goto EXIT_PROC;
+                }
+            } else if (desc->compression == SFL_BMP_COMPRESSION_RLE8) {
+                if (!bpp == 8) {
+                    goto EXIT_PROC;
+                }
+            }
+
+            desc->format = sfl_bmp_decide_pixel_format_from_bitmasks(
+                desc->mask);
+        } break;
+
+        case 16: {
+            if (desc->compression == SFL_BMP_COMPRESSION_NONE) {
+                /* 
+                @note: Documentation mentions that the most significant bit 
+                isn't used in 16 bpp 
+                */
+                desc->format = SFL_BMP_PIXEL_FORMAT_B5G5R5X1;
+            } else if (desc->compression == SFL_BMP_COMPRESSION_BITFIELDS) {
+                desc->format = sfl_bmp_decide_pixel_format_from_bitmasks(
+                    desc->mask);
+            } else {
+                goto EXIT_PROC;
+            }
+        } break;
+
+        case 24: {
+            desc->format = SFL_BMP_PIXEL_FORMAT_B8G8R8;
+            if (desc->compression != SFL_BMP_COMPRESSION_NONE) {
+                goto EXIT_PROC;
+            }
+        } break;
+
+        case 32: {
+            if (desc->compression == SFL_BMP_COMPRESSION_BITFIELDS) {
+                desc->format = sfl_bmp_decide_pixel_format_from_bitmasks(
+                    desc->mask);
+            } else if (desc->compression == SFL_BMP_COMPRESSION_NONE) {
+                desc->format = SFL_BMP_PIXEL_FORMAT_B8G8R8X8;
+            } else {
+                goto EXIT_PROC;
+            }
+        } break;
+
+        default: {
+            goto EXIT_PROC;
+        } break;
+    }
+
+    rc = 1;
+EXIT_PROC:
+    SFL_BMP_SEEK(ctx, 0, SFL_BMP_IO_SET);
+    return rc;
 }
 
 
@@ -787,9 +1037,9 @@ static int sfl_bmp_read_context_decode040(
     SflBmpDecodeSettings settings;
     settings.num_colors = info_header.num_colors;
     settings.compression = info_header.compression;
-    settings.bpp = info_header.core.bpp;
-    settings.width = info_header.core.width;
-    settings.height = info_header.core.height;
+    settings.bpp = info_header.bpp;
+    settings.width = info_header.width;
+    settings.height = info_header.height;
     settings.offset = file_header->offset;
     settings.table_offset = sizeof(SflBmpFileHeader) + sizeof(info_header);
     

@@ -3,3 +3,4 @@ if (WIN32)
 endif()
 
 add_subdirectory("./fs_watch")
+add_subdirectory("./bmp")
