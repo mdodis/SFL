@@ -86,7 +86,7 @@ int main(int argc, char const *argv[]) {
     }
 
     SflBmpReadContext read_context;
-    sfl_bmp_read_context_stdio_init(&read_context);
+    sfl_bmp_read_context_cstd_init(&read_context);
     sfl_bmp_read_context_stdio_set_file(&read_context, f);
 
     SflBmpDesc desc;

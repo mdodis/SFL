@@ -32,10 +32,28 @@ SOFTWARE.
 COMPILE TIME OPTIONS
 
 #define SFL_BMP_IO_IMPLEMENTATION_STDIO 1
-    Includes headers + implementation for C's stdlib
+    Includes headers + implementation for C's stdlib for IO
     Available functions:
       sfl_bmp_read_context_stdio_init
       sfl_bmp_read_context_stdio_set_file
+      sfl_bmp_stdio_get_implementation
+
+#define SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB 1
+    Includes headers + implementation for C's stdlib for memory allocations
+    Available functions:
+      sfl_bmp_read_context_stdlib_init
+      sfl_bmp_stdlib_get_implementation
+
+> If both SFL_BMP_IO_IMPLEMENTATION_STDIO && 
+> SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB
+> are enabled, then there's another available function:
+      sfl_bmp_read_context_cstd_init
+
+#define SFL_BMP_IO_IMPLEMENTATION_WINAPI 0
+    Includes implementation for Win API
+    Available functions:
+      sfl_bmp_read_context_winapi_io_init
+      sfl_bmp_read_context_winapi_io_set_file
 
 #define SFML_BMP_CUSTOM_TYPES 0
     Disables include of <stdint.h> for custom type support, instead provided
@@ -84,6 +102,7 @@ Michael Dodis (michaeldodisgr@gmail.com)
 TODO
 - Correct memory usage (currently, nothing is freed after use)
     - Add sfl_bmp_desc_free to deallocate image data given mem implementation
+- sfl_bmp_read_context_deinit
 
 BYTE ORDER / ENDIANESS
 Components are typed in c array order (least significant address comes first).
@@ -103,6 +122,14 @@ REFERENCES
  */
 #ifndef SFL_BMP_IO_IMPLEMENTATION_STDIO
 #define SFL_BMP_IO_IMPLEMENTATION_STDIO 1
+#endif
+
+#ifndef SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB
+#define SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB 1
+#endif
+
+#ifndef SFL_BMP_IO_IMPLEMENTATION_WINAPI
+#define SFL_BMP_IO_IMPLEMENTATION_WINAPI 0
 #endif
 
 #ifndef SFL_BMP_CUSTOM_TYPES
@@ -282,10 +309,40 @@ extern const char *sfl_bmp_describe_pixel_format(int format);
  */
 #if SFL_BMP_IO_IMPLEMENTATION_STDIO
 #include <stdio.h>
-extern void sfl_bmp_read_context_stdio_init(SflBmpReadContext *ctx);
+extern void sfl_bmp_read_context_stdio_init(
+    SflBmpReadContext *ctx, 
+    SflBmpMemoryImplementation *memory);
 extern void sfl_bmp_read_context_stdio_set_file(
     SflBmpReadContext *ctx, 
     FILE *file);
+extern SflBmpIOImplementation *sfl_bmp_stdio_get_implementation(void);
+#endif
+
+/**
+ * STDLIB Implementation 
+ */
+#if SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB
+extern void sfl_bmp_read_context_stdlib_init(
+    SflBmpReadContext *ctx, 
+    SflBmpIOImplementation *io);
+extern SflBmpMemoryImplementation *sfl_bmp_stdlib_get_implementation(void);
+#endif
+
+#if SFL_BMP_IO_IMPLEMENTATION_STDIO && SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB
+extern void sfl_bmp_read_context_cstd_init(SflBmpReadContext *ctx);
+#endif
+
+#if SFL_BMP_IO_IMPLEMENTATION_WINAPI
+#include <Windows.h>
+extern void sfl_bmp_read_context_winapi_io_init(
+    SflBmpReadContext *ctx,
+    SflBmpMemoryImplementation *memory);
+
+extern void sfl_bmp_read_context_winapi_io_set_file(
+    SflBmpReadContext *ctx,
+    HANDLE *file);
+
+extern SflBmpIOImplementation *sfl_bmp_winapi_io_get_implementation(void);
 #endif
 
 #endif
@@ -701,51 +758,20 @@ int sfl_bmp_read_context_probe(
         default: break;
     }
 
+    // @todo: fill out rest of desc here
+
 EXIT_ERROR:
     return 0;
 }
 
 
 int sfl_bmp_read_context_decode(SflBmpReadContext *ctx, SflBmpDesc *desc) {
-    /** Read in file header and determine file type */
-    SflBmpFileHeader file_header;
-    if (!SFL_BMP_READ_STRUCT(SflBmpFileHeader, ctx, &file_header)) {
-        goto EXIT_ERROR;
-    }
-
-    if (file_header.hdr[0] != 'B' || file_header.hdr[1] != 'M')  {
-        goto EXIT_ERROR;
-    }
-
-    /** Read/Determine info header version */
-    SflBmpU32 info_header_size;
-
-    if (!SFL_BMP_READ(ctx, &info_header_size, sizeof(info_header_size))) {
-        goto EXIT_ERROR;
-    }
-
-    if (SFL_BMP_SEEK(ctx, -((long)sizeof(info_header_size)), SFL_BMP_IO_CUR)) {
-        goto EXIT_ERROR;
-    }
-
-    switch (info_header_size) {
-
-        case sizeof(SflBmpInfoHeader040): {
-            return sfl_bmp_read_context_decode040(ctx, &file_header, desc);
-        } break;
-
-        case sizeof(SflBmpInfoHeader124): {
-            return sfl_bmp_read_context_decode124(ctx, &file_header, desc);
-        } break;
-
-        default: {
-            goto EXIT_ERROR;
-        } break;
+    SflBmpDesc intermediate_desc;
+    if (!sfl_bmp_read_context_probe(ctx, &intermediate_desc)) {
+        return 0;
     }
 
     return 1;
-EXIT_ERROR:
-    return 0;
 }
 
 
@@ -1110,7 +1136,6 @@ static int sfl_bmp_read_context_extract_paletted_none(
 
 #if SFL_BMP_IO_IMPLEMENTATION_STDIO
 #include <stdio.h>
-#include <stdlib.h>
 
 static PROC_SFL_BMP_IO_READ(sfl_bmp_stdlib_read) {
     FILE *f = (FILE*)usr;
@@ -1137,27 +1162,17 @@ static PROC_SFL_BMP_IO_TELL(sfl_bmp_stdlib_tell) {
     return ftell(f);
 }
 
-static PROC_SFL_BMP_MEMORY_ALLOCATE(sfl_bmp_stdlib_allocate) {
-    return malloc(size);
-}
-
-static PROC_SFL_BMP_MEMORY_RELEASE(sfl_bmp_stdlib_release) {
-    free(ptr);
-}
-
 static SflBmpIOImplementation SflBmp_IO_STDLIB = {
     sfl_bmp_stdlib_read,
     sfl_bmp_stdlib_seek,
     sfl_bmp_stdlib_tell,
 };
 
-static SflBmpMemoryImplementation SflBmp_Memory_STDLIB = {
-    sfl_bmp_stdlib_allocate,
-    sfl_bmp_stdlib_release,
-};
-
-void sfl_bmp_read_context_stdio_init(SflBmpReadContext *ctx) {
-    sfl_bmp_read_context_init(ctx, &SflBmp_IO_STDLIB, &SflBmp_Memory_STDLIB);
+void sfl_bmp_read_context_stdio_init(
+    SflBmpReadContext *ctx,
+    SflBmpMemoryImplementation *memory) 
+{
+    sfl_bmp_read_context_init(ctx, &SflBmp_IO_STDLIB, memory);
 }
 
 void sfl_bmp_read_context_stdio_set_file(
@@ -1167,6 +1182,130 @@ void sfl_bmp_read_context_stdio_set_file(
     sfl_bmp_read_context_set_io_usr(ctx, (void*)file);
 }
 
+SflBmpIOImplementation *sfl_bmp_stdio_get_implementation(void) {
+    return &SflBmp_IO_STDLIB;
+}
+
+#endif
+
+#if SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB
+#include <stdlib.h>
+
+static PROC_SFL_BMP_MEMORY_ALLOCATE(sfl_bmp_stdlib_allocate) {
+    return malloc(size);
+}
+
+static PROC_SFL_BMP_MEMORY_RELEASE(sfl_bmp_stdlib_release) {
+    free(ptr);
+}
+
+static SflBmpMemoryImplementation SflBmp_Memory_STDLIB = {
+    sfl_bmp_stdlib_allocate,
+    sfl_bmp_stdlib_release,
+};
+
+void sfl_bmp_read_context_stdlib_init(
+    SflBmpReadContext *ctx,
+    SflBmpIOImplementation *io) 
+{
+    sfl_bmp_read_context_init(ctx, io, &SflBmp_Memory_STDLIB);
+}
+
+SflBmpMemoryImplementation *sfl_bmp_stdlib_get_implementation(void) {
+    return &SflBmp_Memory_STDLIB;
+}
+
+/* SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB */
+#endif
+
+#if SFL_BMP_IO_IMPLEMENTATION_STDIO && SFL_BMP_MEMORY_IMPLEMENTATION_STDLIB
+void sfl_bmp_read_context_cstd_init(SflBmpReadContext *ctx) {
+    sfl_bmp_read_context_init(ctx, &SflBmp_IO_STDLIB, &SflBmp_Memory_STDLIB);
+}
+
+#endif
+
+#if SFL_BMP_IO_IMPLEMENTATION_WINAPI
+
+static PROC_SFL_BMP_IO_READ(sfl_bmp_winapi_read) {
+    HANDLE *f = (HANDLE*)usr;
+    DWORD bytes_read;
+    BOOL success = ReadFile(*f, ptr, size, &bytes_read, NULL);
+    return success && (bytes_read == size);
+}
+
+static PROC_SFL_BMP_IO_SEEK(sfl_bmp_winapi_seek) {
+    DWORD move_method = 3;
+
+    switch (whence) {
+        case SFL_BMP_IO_SET: move_method = FILE_BEGIN;   break;
+        case SFL_BMP_IO_CUR: move_method = FILE_CURRENT; break;
+        case SFL_BMP_IO_END: move_method = FILE_END;     break;
+        default: {
+            return -1;
+        } break;
+    }
+
+    HANDLE *f = (HANDLE*)usr;
+    DWORD result = SetFilePointer(*f, offset, 0, move_method);
+    if (result == INVALID_SET_FILE_POINTER) {
+        /* 
+        INVALID_SET_FILE_POINTER is a valid low order dword return value, so we
+        have to check with GetLastError() if this failed
+        */
+        if (GetLastError() == ERROR_SUCCESS) {
+            return 0;
+        } else {
+            return -1;
+        }
+    } else {
+        return 0;
+    }
+}
+
+static PROC_SFL_BMP_IO_TELL(sfl_bmp_winapi_tell) {
+    HANDLE *f = (HANDLE*)usr;
+    DWORD result = SetFilePointer(*f, 0, 0, 0);
+    if (result == INVALID_SET_FILE_POINTER) {
+        /* 
+        INVALID_SET_FILE_POINTER is a valid low order dword return value, so we
+        have to check with GetLastError() if this failed
+        */
+        if (GetLastError() == ERROR_SUCCESS) {
+            return (long)result;
+        } else {
+            return -1;
+        }
+    } else {
+        return (long)result;
+    }
+}
+
+static SflBmpIOImplementation SflBmp_IO_WINAPI = {
+    sfl_bmp_winapi_read,
+    sfl_bmp_winapi_seek,
+    sfl_bmp_winapi_tell,
+};
+
+void sfl_bmp_read_context_winapi_io_init(
+    SflBmpReadContext *ctx,
+    SflBmpMemoryImplementation *memory)
+{
+    sfl_bmp_read_context_init(ctx, &SflBmp_IO_WINAPI, memory);
+}
+
+void sfl_bmp_read_context_winapi_io_set_file(
+    SflBmpReadContext *ctx,
+    HANDLE *file)
+{
+    ctx->io->usr = (void*)file;
+}
+
+SflBmpIOImplementation *sfl_bmp_winapi_io_get_implementation(void) {
+    return &SflBmp_IO_WINAPI;
+}
+
+/* SFL_BMP_IO_IMPLEMENTATION_WINAPI */
 #endif
 
 #undef SFL_BMP_READ_STRUCT
