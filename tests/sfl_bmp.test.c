@@ -15,7 +15,7 @@ static TestCase Test_Cases[] = {
     },
 };
 
-static int test(SflBmpReadContext *ctx, TestCase *test_case) {
+static int test(SflBmpContext *ctx, TestCase *test_case) {
 }
 
 
@@ -85,12 +85,12 @@ int main(int argc, char const *argv[]) {
         return -1;
     }
 
-    SflBmpReadContext read_context;
-    sfl_bmp_read_context_cstd_init(&read_context);
-    sfl_bmp_read_context_stdio_set_file(&read_context, f);
+    SflBmpContext read_context;
+    sfl_bmp_cstd_init(&read_context);
+    sfl_bmp_stdio_set_file(&read_context, f);
 
     SflBmpDesc desc;
-    if (sfl_bmp_read_context_decode(&read_context, &desc) == 0) {
+    if (sfl_bmp_decode(&read_context, &desc) == 0) {
         perror("Failed.");
         return -1;
     }

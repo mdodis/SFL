@@ -528,15 +528,15 @@ static unsigned char *load_image_sfl(
     int *out_width, 
     int *out_height)
 {
-    SflBmpReadContext ctx;
-    sfl_bmp_read_context_winapi_io_init(
+    SflBmpContext ctx;
+    sfl_bmp_winapi_io_init(
         &ctx, 
         sfl_bmp_stdlib_get_implementation());
     
-    sfl_bmp_read_context_winapi_io_set_file(&ctx, &file_handle);
+    sfl_bmp_winapi_io_set_file(&ctx, &file_handle);
 
     SflBmpDesc desc;
-    if (!sfl_bmp_read_context_decode(&ctx, &desc)) {
+    if (!sfl_bmp_decode(&ctx, &desc)) {
         return 0;
     }
     

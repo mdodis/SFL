@@ -46,20 +46,26 @@ typedef struct {
 } Generator;
 
 static PROC_GENERATE(gen_v5_1bpp);
+static PROC_GENERATE(gen_v1_16bpp_rgb);
 
 static const Generator The_Generators[] = {
     {
         gen_v5_1bpp,
         "v5-1bpp",
-        "Generates GIMP bitmap with 1 bit per pixel"
+        "Generates v5 bitmap with 1 bit per pixel"
     },
+    {
+        gen_v1_16bpp_rgb,
+        "v1-16bpp-rgb",
+        "Generates v1 bitmap with 16 bits per pixel and RGB compression"
+    }
 };
 
 static void print_help() {
     puts("Invocation: bmp_generate <tag> <path>");
     for (int i = 0; i < ARRAY_COUNT(The_Generators); ++i) {
         Generator *generator = &The_Generators[i];
-        printf("%-10s :: %s\n", generator->tag, generator->description);
+        printf("%-20s %s\n", generator->tag, generator->description);
     }
 }
 
@@ -108,7 +114,7 @@ static PROC_GENERATE(gen_v5_1bpp) {
     ADD_U32(f, 0);       // reserved[2]
     ADD_U32(f, 146);     // offset to pixel data
 
-    // Add info header SflBmpInfoHeader124 (12 bytes)
+    // Add info header SflBmpInfoHeader124 (14 bytes) @todo: check offsets again
     ADD_U32(f, 124);     // header size
     ADD_I32(f, 2);       // width
     ADD_I32(f, 2);       // height
@@ -146,7 +152,30 @@ static PROC_GENERATE(gen_v5_1bpp) {
     // Image data (padded) (144 bytes)
     ADD_BYTES(f, 
         0b10000000, 0x00, 0x00, 0x00,
-        0b01000000, 0x00, 0x00, 0x00,
-    );
+        0b01000000, 0x00, 0x00, 0x00);
 }
 
+static PROC_GENERATE(gen_v1_16bpp_rgb) {
+    ADD_STRING(f, "BM");
+    ADD_U32(f, 70);      // file size 
+    ADD_U32(f, 0);       // reserved[2]
+    ADD_U32(f, 54);      // @todo offset to pixel data
+
+    // Add info header BITMAPINFOHEADER (14 bytes)
+    ADD_U32(f, 40);      // header size
+    ADD_I32(f, 2);       // width
+    ADD_I32(f, 2);       // height
+    ADD_U16(f, 1);       // planes
+    ADD_U16(f, 16);      // bpp
+    ADD_U32(f, 0);       // compression: none
+    ADD_U32(f, 8);       // @todo raw size
+    ADD_I32(f, 0);       // hres
+    ADD_I32(f, 0);       // vres
+    ADD_U32(f, 0);       // @todo num colors
+    ADD_U32(f, 0);       // @todo num important colors
+
+    // Image data (54 bytes)
+    ADD_BYTES(f,
+        0xe0, 0x03,  0xff, 0x7f,
+        0x00, 0x7c,  0x1f, 0x00);
+}

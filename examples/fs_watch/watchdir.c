@@ -1,6 +1,6 @@
 /* SFL watchdir v0.1
 
-This example use sfl_fs_watch.h to watch one or more directories/files for 
+This example uses sfl_fs_watch.h to watch one or more directories/files for 
 changes.
 
 MIT License

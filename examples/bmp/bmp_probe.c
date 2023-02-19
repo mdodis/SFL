@@ -1,3 +1,40 @@
+/* SFL bmp_probe v0.1
+
+This example uses sfl_bmp.h to probe a BMP image file, and output its relevant
+attributes.
+
+MIT License
+
+Copyright (c) 2023 Michael Dodis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+USAGE
+bmp_probe <path>
+
+- path:  Relative or absolute path to file or directory
+
+Example: bmp_probe ./myfile.bmp
+
+CONTRIBUTION
+Michael Dodis (michaeldodisgr@gmail.com)
+*/
 #include <stdio.h>
 #include "sfl_bmp.h"
 
@@ -14,13 +51,13 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    SflBmpReadContext ctx;
-    sfl_bmp_read_context_cstd_init(&ctx);
+    SflBmpContext ctx;
+    sfl_bmp_cstd_init(&ctx);
 
-    sfl_bmp_read_context_stdio_set_file(&ctx, f);
+    sfl_bmp_stdio_set_file(&ctx, f);
 
     SflBmpDesc desc;
-    if (!sfl_bmp_read_context_probe(&ctx, &desc)) {
+    if (!sfl_bmp_probe(&ctx, &desc)) {
         fprintf(stderr, "%s: Invalid file format.\n", argv[1]);
         return -1;
     }
@@ -39,6 +76,7 @@ int main(int argc, char *argv[]) {
     printf("%-20s 0x%08x\n", "G mask", desc.mask[1]);
     printf("%-20s 0x%08x\n", "B mask", desc.mask[2]);
     printf("%-20s 0x%08x\n", "A mask", desc.mask[3]);
+    printf("%-20s %u\n", "# Palette Entries", desc.num_table_entries);
     return 0;
 }
 
