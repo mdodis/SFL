@@ -53,6 +53,9 @@ int main(int argc, char *argv[]) {
     sfl_bmp_cstd_init(&write_ctx);
 
     inf = fopen(argv[1], "rb");
+    fseek(inf, 0, SEEK_END);
+    printf("File size %d\n", ftell(inf));
+    fseek(inf, 0, SEEK_SET);
     sfl_bmp_stdio_set_file(&read_ctx, inf);
 
     SflBmpDesc in_desc;
@@ -61,8 +64,8 @@ int main(int argc, char *argv[]) {
     }
 
     SflBmpDesc out_desc = {0};
-    out_desc.format = SFL_BMP_PIXEL_FORMAT_R8G8B8A8;
-    out_desc.compression = SFL_BMP_COMPRESSION_BITFIELDS;
+    out_desc.format = SFL_BMP_PIXEL_FORMAT_B8G8R8X8;
+    out_desc.compression = SFL_BMP_COMPRESSION_NONE;
     out_desc.file_header_id = SFL_BMP_HDR_ID_BM;
     out_desc.info_header_id = SFL_BMP_NFO_ID_V5;
 
@@ -71,9 +74,11 @@ int main(int argc, char *argv[]) {
     sfl_bmp_encode(
         &write_ctx,
         &in_desc,
-        read_ctx.io, 
+        &read_ctx.io, 
         &out_desc);
 
+    fclose(outf);
+    fclose(inf);
     return 0;
 }
 
