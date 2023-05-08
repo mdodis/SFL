@@ -1,7 +1,7 @@
 /* SFL wimv v0.1
 
 This example uses Direct3D11, the Windows Imaging Component and sfl_fs_watch.h
-to load and display an image file, and reload it if it is changed from some 
+to load and display an image file, and reload it if it is changed from some
 other editor
 
 MIT License
@@ -33,7 +33,8 @@ wimv <path>
 
 DOCUMENTATION
 This example uses the Windows Imaging Component to load images, so it should
-support any image supported by WIC. See https://learn.microsoft.com/en-us/windows/win32/wic/-wic-about-windows-imaging-codec#native-codecs
+support any image supported by WIC. See
+https://learn.microsoft.com/en-us/windows/win32/wic/-wic-about-windows-imaging-codec#native-codecs
 for the natively supported codecs
 
 CONTRIBUTION
@@ -44,34 +45,34 @@ Michael Dodis (michaeldodisgr@gmail.com)
 #define _UNICODE
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-#include <shellapi.h>
+#include <assert.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
-#include <wincodec.h>
 #include <objbase.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
+#include <wincodec.h>
 
 #include "sfl_fs_watch.h"
 
-#define SFL_BMP_IO_IMPLEMENTATION_STDIO  0
+#define SFL_BMP_IO_IMPLEMENTATION_STDIO 0
 #define SFL_BMP_IO_IMPLEMENTATION_WINAPI 1
 #include "sfl_bmp.h"
 
-constexpr wchar_t *Window_Class_Name = L"wimv_viewer_window";
-const int Client_Width  = 640;
-const int Client_Height = 480;
+const wchar_t* Window_Class_Name = L"wimv_viewer_window";
+const int      Client_Width      = 640;
+const int      Client_Height     = 480;
 
-#define CHECK_HRESULT(expr)                                 \
-    do {                                                    \
-        HRESULT _result = (expr);                           \
-        if (!SUCCEEDED(_result)) {                          \
-            char buf[256];                                  \
-            sprintf(buf, "HRESULT = 0x%x", _result);        \
-            MessageBoxA(0, #expr, buf, MB_OK);              \
-            ExitProcess(1);                                 \
-        }                                                   \
+#define CHECK_HRESULT(expr)                          \
+    do {                                             \
+        HRESULT _result = (expr);                    \
+        if (!SUCCEEDED(_result)) {                   \
+            char buf[256];                           \
+            sprintf(buf, "HRESULT = 0x%x", _result); \
+            MessageBoxA(0, #expr, buf, MB_OK);       \
+            ExitProcess(1);                          \
+        }                                            \
     } while (0)
 
 static struct {
@@ -79,37 +80,35 @@ static struct {
     bool running;
 
     // Parameters
-    bool use_sfl = false;
-    const wchar_t *filew = 0;
-    const char *file = 0;
+    bool           use_sfl = false;
+    const wchar_t* filew   = 0;
+    const char*    file    = 0;
 
     // D3D
-    IDXGISwapChain           *swap_chain;
-    ID3D11Device             *device;
-    ID3D11DeviceContext      *device_ctx;
-    ID3D11RenderTargetView   *rtv;
-    ID3D11Texture2D          *tr = 0;
-    ID3D11ShaderResourceView *srv = 0;
-    ID3DBlob                 *vs_blob, *ps_blob;
-    ID3D11VertexShader       *vs;
-    ID3D11PixelShader        *ps;
-    ID3D11SamplerState       *smp;
+    IDXGISwapChain*           swap_chain;
+    ID3D11Device*             device;
+    ID3D11DeviceContext*      device_ctx;
+    ID3D11RenderTargetView*   rtv;
+    ID3D11Texture2D*          tr  = 0;
+    ID3D11ShaderResourceView* srv = 0;
+    ID3DBlob *                vs_blob, *ps_blob;
+    ID3D11VertexShader*       vs;
+    ID3D11PixelShader*        ps;
+    ID3D11SamplerState*       smp;
 
     // Watch
     SflFsWatchContext watch;
 } G;
 
 static LRESULT win_proc(
-    HWND window_handle, 
-    UINT message, 
-    WPARAM wparam, 
-    LPARAM lparam);
+    HWND window_handle, UINT message, WPARAM wparam, LPARAM lparam);
 
-static void load_image(const wchar_t *path);
-static wchar_t *multibyte_to_wstr(const char *multibyte);
-static char *wstr_to_multibyte(const wchar_t *wstr);
+static void     load_image(const wchar_t* path);
+static wchar_t* multibyte_to_wstr(const char* multibyte);
+static char*    wstr_to_multibyte(const wchar_t* wstr);
 
-PROC_SFL_FS_WATCH_NOTIFY(my_notify) {
+PROC_SFL_FS_WATCH_NOTIFY(my_notify)
+{
     if (notification->kind == SFL_FS_WATCH_NOTIFICATION_FILE_MODIFIED) {
         OutputDebugStringA(notification->path);
         OutputDebugStringA(" changed");
@@ -118,7 +117,8 @@ PROC_SFL_FS_WATCH_NOTIFY(my_notify) {
     }
 }
 
-static void render() {
+static void render()
+{
     // Render
     float clear_color[4] = {
         1.0f,
@@ -130,37 +130,32 @@ static void render() {
     G.device_ctx->ClearRenderTargetView(G.rtv, clear_color);
 
     if (G.srv != 0) {
-
-        G.device_ctx->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        G.device_ctx->IASetPrimitiveTopology(
+            D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         G.device_ctx->VSSetShader(G.vs, 0, 0);
         G.device_ctx->PSSetShader(G.ps, 0, 0);
 
-        ID3D11ShaderResourceView *views[1] = {
-            G.srv
-        };
+        ID3D11ShaderResourceView* views[1] = {G.srv};
 
-        ID3D11SamplerState *sampler_states[1] = {
-            G.smp
-        };
+        ID3D11SamplerState* sampler_states[1] = {G.smp};
 
         G.device_ctx->PSSetShaderResources(0, 1, views);
         G.device_ctx->PSSetSamplers(0, 1, sampler_states);
 
         D3D11_VIEWPORT viewport = {};
-        viewport.TopLeftX = 0;
-        viewport.TopLeftY = 0;
-        viewport.MaxDepth = 1;
-        viewport.Width  = float(Client_Width);
-        viewport.Height = float(Client_Height);
+        viewport.TopLeftX       = 0;
+        viewport.TopLeftY       = 0;
+        viewport.MaxDepth       = 1;
+        viewport.Width          = float(Client_Width);
+        viewport.Height         = float(Client_Height);
         G.device_ctx->RSSetViewports(1, &viewport);
         G.device_ctx->Draw(6, 0);
-
     }
 
     G.swap_chain->Present(1, 0);
 }
 
-static const char *Simple_Shader = R"(
+static const char* Simple_Shader = R"(
 static float2 uv_ar[6] = {
     float2(0.0, 1.0),
     float2(0.0, 0.0),
@@ -200,13 +195,10 @@ float4 ps_main(vs_out input) : SV_TARGET {
 )";
 
 int wWinMain(
-    HINSTANCE instance,
-    HINSTANCE prev_instance,
-    LPWSTR cmdline,
-    int cmdshow)
+    HINSTANCE instance, HINSTANCE prev_instance, LPWSTR cmdline, int cmdshow)
 {
-    int argc;
-    wchar_t **argv = CommandLineToArgvW(cmdline, &argc);
+    int       argc;
+    wchar_t** argv = CommandLineToArgvW(cmdline, &argc);
 
     for (int i = 0; i < argc; ++i) {
         if (wcscmp(argv[i], L"-sfl") == 0) {
@@ -220,11 +212,11 @@ int wWinMain(
 
     WNDCLASSEXW wndclass;
     ZeroMemory(&wndclass, sizeof(wndclass));
-    wndclass.cbSize = sizeof(wndclass);
+    wndclass.cbSize        = sizeof(wndclass);
     wndclass.lpszClassName = Window_Class_Name;
-    wndclass.hInstance = instance;
-    wndclass.hCursor = LoadCursorW(instance, 0);
-    wndclass.lpfnWndProc = win_proc;
+    wndclass.hInstance     = instance;
+    wndclass.hCursor       = LoadCursorW(instance, 0);
+    wndclass.lpfnWndProc   = win_proc;
 
     if (!RegisterClassExW(&wndclass)) {
         DWORD error = GetLastError();
@@ -235,16 +227,19 @@ int wWinMain(
     RECT r;
     ZeroMemory(&r, sizeof(r));
 
-    r.right = Client_Width;
+    r.right  = Client_Width;
     r.bottom = Client_Height;
-    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, false);    
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, false);
 
     G.window = CreateWindowExW(
         0,
         Window_Class_Name,
         L"WIMV",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        r.right - r.left,
+        r.bottom - r.top,
         0,
         0,
         instance,
@@ -254,16 +249,16 @@ int wWinMain(
         return -1;
     }
 
-    DXGI_SWAP_CHAIN_DESC swap_chain_desc = {};
-    swap_chain_desc.OutputWindow = G.window;
-    swap_chain_desc.Windowed = true;
-    swap_chain_desc.BufferDesc.RefreshRate.Numerator = 0;
+    DXGI_SWAP_CHAIN_DESC swap_chain_desc               = {};
+    swap_chain_desc.OutputWindow                       = G.window;
+    swap_chain_desc.Windowed                           = true;
+    swap_chain_desc.BufferDesc.RefreshRate.Numerator   = 0;
     swap_chain_desc.BufferDesc.RefreshRate.Denominator = 1;
-    swap_chain_desc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    swap_chain_desc.SampleDesc.Count = 1;
+    swap_chain_desc.BufferDesc.Format  = DXGI_FORMAT_B8G8R8A8_UNORM;
+    swap_chain_desc.SampleDesc.Count   = 1;
     swap_chain_desc.SampleDesc.Quality = 0;
-    swap_chain_desc.BufferCount = 1;
-    swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swap_chain_desc.BufferCount        = 1;
+    swap_chain_desc.BufferUsage        = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 
     D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_1;
 
@@ -281,11 +276,10 @@ int wWinMain(
         &feature_level,
         &G.device_ctx));
 
-    ID3D11Texture2D *back_buffer;
-    CHECK_HRESULT(G.swap_chain->GetBuffer(
-        0, 
-        __uuidof(ID3D11Texture2D), 
-        (void**)&back_buffer));
+    ID3D11Texture2D* back_buffer;
+    CHECK_HRESULT(
+        G.swap_chain
+            ->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back_buffer));
 
     CHECK_HRESULT(G.device->CreateRenderTargetView(back_buffer, 0, &G.rtv));
     G.device_ctx->OMSetRenderTargets(1, &G.rtv, 0);
@@ -304,34 +298,40 @@ int wWinMain(
 
     // Create sampler state
     D3D11_SAMPLER_DESC smp_desc = {};
-    smp_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    smp_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    smp_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    smp_desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    smp_desc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
-    smp_desc.MinLOD = 0;
-    smp_desc.MaxLOD = D3D11_FLOAT32_MAX;
+    smp_desc.Filter             = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    smp_desc.AddressU           = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp_desc.AddressV           = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp_desc.AddressW           = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp_desc.ComparisonFunc     = D3D11_COMPARISON_ALWAYS;
+    smp_desc.MinLOD             = 0;
+    smp_desc.MaxLOD             = D3D11_FLOAT32_MAX;
     G.device->CreateSamplerState(&smp_desc, &G.smp);
 
     // Create & compile shader
-    ID3DBlob *errors;
-    CHECK_HRESULT(D3DCompile
-        ((void*)Simple_Shader,
+    ID3DBlob* errors;
+    CHECK_HRESULT(D3DCompile(
+        (void*)Simple_Shader,
         strlen(Simple_Shader),
-        0, 0, 0,
+        0,
+        0,
+        0,
         "vs_main",
         "vs_4_0",
-        0, 0,
+        0,
+        0,
         &G.vs_blob,
         &errors));
 
-    CHECK_HRESULT(D3DCompile
-        ((void*)Simple_Shader,
+    CHECK_HRESULT(D3DCompile(
+        (void*)Simple_Shader,
         strlen(Simple_Shader),
-        0, 0, 0,
+        0,
+        0,
+        0,
         "ps_main",
         "ps_4_0",
-        0, 0,
+        0,
+        0,
         &G.ps_blob,
         &errors));
 
@@ -359,17 +359,13 @@ int wWinMain(
 
         SflFsWatchResult result = sfl_fs_watch_poll(&G.watch);
         assert(result >= 0);
-
     }
 
-    return 0;    
+    return 0;
 }
 
 static LRESULT win_proc(
-    HWND window_handle, 
-    UINT message, 
-    WPARAM wparam, 
-    LPARAM lparam)
+    HWND window_handle, UINT message, WPARAM wparam, LPARAM lparam)
 {
     LRESULT result = 0;
 
@@ -387,18 +383,14 @@ static LRESULT win_proc(
     return result;
 }
 
-static unsigned char *load_image_wic(
-    HANDLE file_handle, 
-    int *out_width, 
-    int *out_height);
+static unsigned char* load_image_wic(
+    HANDLE file_handle, int* out_width, int* out_height);
 
-static unsigned char *load_image_sfl(
-    HANDLE file_handle, 
-    int *out_width, 
-    int *out_height);
+static unsigned char* load_image_sfl(
+    HANDLE file_handle, int* out_width, int* out_height);
 
-static void load_image(const wchar_t *path) {
-
+static void load_image(const wchar_t* path)
+{
     HANDLE file_handle = CreateFileW(
         path,
         GENERIC_READ,
@@ -422,8 +414,8 @@ static void load_image(const wchar_t *path) {
         G.tr = 0;
     }
 
-    unsigned char *data;
-    int width, height;
+    unsigned char* data;
+    int            width, height;
     if (G.use_sfl) {
         data = load_image_sfl(file_handle, &width, &height);
     } else {
@@ -435,27 +427,27 @@ static void load_image(const wchar_t *path) {
     }
 
     D3D11_TEXTURE2D_DESC tex_desc = {};
-    tex_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    tex_desc.Width = width;
-    tex_desc.Height = height;
-    tex_desc.SampleDesc.Count = 1;
-    tex_desc.SampleDesc.Quality = 0;
-    tex_desc.MipLevels = 1;
-    tex_desc.ArraySize = 1;
-    tex_desc.Usage = D3D11_USAGE_DEFAULT;
-    tex_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    tex_desc.Format               = DXGI_FORMAT_R8G8B8A8_UNORM;
+    tex_desc.Width                = width;
+    tex_desc.Height               = height;
+    tex_desc.SampleDesc.Count     = 1;
+    tex_desc.SampleDesc.Quality   = 0;
+    tex_desc.MipLevels            = 1;
+    tex_desc.ArraySize            = 1;
+    tex_desc.Usage                = D3D11_USAGE_DEFAULT;
+    tex_desc.BindFlags            = D3D11_BIND_SHADER_RESOURCE;
 
     D3D11_SUBRESOURCE_DATA tex_data = {};
-    tex_data.pSysMem = data;
-    tex_data.SysMemPitch = width * 4;
+    tex_data.pSysMem                = data;
+    tex_data.SysMemPitch            = width * 4;
 
     CHECK_HRESULT(G.device->CreateTexture2D(&tex_desc, &tex_data, &G.tr));
 
     D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-    srv_desc.Format = tex_desc.Format;
-    srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srv_desc.Texture2D.MipLevels = tex_desc.MipLevels;
-    srv_desc.Texture2D.MostDetailedMip = 0;
+    srv_desc.Format                          = tex_desc.Format;
+    srv_desc.ViewDimension                   = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srv_desc.Texture2D.MipLevels             = tex_desc.MipLevels;
+    srv_desc.Texture2D.MostDetailedMip       = 0;
 
     CHECK_HRESULT(G.device->CreateShaderResourceView(G.tr, &srv_desc, &G.srv));
 
@@ -464,33 +456,30 @@ static void load_image(const wchar_t *path) {
     CloseHandle(file_handle);
 }
 
-static unsigned char *load_image_wic(
-    HANDLE file_handle, 
-    int *out_width, 
-    int *out_height)
+static unsigned char* load_image_wic(
+    HANDLE file_handle, int* out_width, int* out_height)
 {
-
-    IWICImagingFactory *factory;
+    IWICImagingFactory* factory;
     CHECK_HRESULT(CoCreateInstance(
         CLSID_WICImagingFactory,
         0,
         CLSCTX_INPROC_SERVER,
         IID_IWICImagingFactory,
         (void**)&factory));
-    
+
     WICDecodeOptions decode_options = WICDecodeMetadataCacheOnDemand;
 
-    IWICBitmapDecoder *decoder;
+    IWICBitmapDecoder* decoder;
     CHECK_HRESULT(factory->CreateDecoderFromFileHandle(
         (ULONG_PTR)file_handle,
         0,
         decode_options,
         &decoder));
 
-    IWICBitmapFrameDecode *frame;
+    IWICBitmapFrameDecode* frame;
     CHECK_HRESULT(decoder->GetFrame(0, &frame));
 
-    IWICFormatConverter *converter;
+    IWICFormatConverter* converter;
     CHECK_HRESULT(factory->CreateFormatConverter(&converter));
 
     CHECK_HRESULT(converter->Initialize(
@@ -504,49 +493,43 @@ static unsigned char *load_image_wic(
     unsigned int width, height;
     converter->GetSize(&width, &height);
 
-    unsigned char *data = (unsigned char*)malloc(width * height * 4);
+    unsigned char* data = (unsigned char*)malloc(width * height * 4);
 
-    CHECK_HRESULT(converter->CopyPixels(
-        0,
-        width * 4,
-        (UINT)(width * height * 4),
-        data));
+    CHECK_HRESULT(
+        converter->CopyPixels(0, width * 4, (UINT)(width * height * 4), data));
 
     converter->Release();
     frame->Release();
     decoder->Release();
     factory->Release();
 
-    *out_width = width;
+    *out_width  = width;
     *out_height = height;
 
     return data;
 }
 
-static unsigned char *load_image_sfl(
-    HANDLE file_handle, 
-    int *out_width, 
-    int *out_height)
+static unsigned char* load_image_sfl(
+    HANDLE file_handle, int* out_width, int* out_height)
 {
     SflBmpContext ctx;
-    sfl_bmp_winapi_io_init(
-        &ctx, 
-        sfl_bmp_stdlib_get_implementation());
-    
+    sfl_bmp_winapi_io_init(&ctx, sfl_bmp_stdlib_get_implementation());
+
     sfl_bmp_winapi_io_set_file(&ctx, &file_handle);
 
     SflBmpDesc desc;
     if (!sfl_bmp_decode(&ctx, &desc)) {
         return 0;
     }
-    
+
     *out_width  = desc.width;
     *out_height = desc.height;
 
     return (unsigned char*)desc.data;
 }
 
-static char *wstr_to_multibyte(const wchar_t *wstr) {
+static char* wstr_to_multibyte(const wchar_t* wstr)
+{
     size_t wstr_len = (int)wcslen(wstr);
 
     int num_bytes = WideCharToMultiByte(
@@ -554,9 +537,12 @@ static char *wstr_to_multibyte(const wchar_t *wstr) {
         WC_ERR_INVALID_CHARS,
         wstr,
         (int)wstr_len,
-        0, 0, 0, 0);
-    
-    char *result = (char*)malloc(num_bytes + 1);
+        0,
+        0,
+        0,
+        0);
+
+    char* result = (char*)malloc(num_bytes + 1);
 
     WideCharToMultiByte(
         CP_UTF8,
@@ -569,10 +555,11 @@ static char *wstr_to_multibyte(const wchar_t *wstr) {
         0);
 
     result[num_bytes] = 0;
-    return result;    
+    return result;
 }
 
-static wchar_t *multibyte_to_wstr(const char *multibyte) {
+static wchar_t* multibyte_to_wstr(const char* multibyte)
+{
     int multibyte_len = (int)strlen(multibyte);
 
     int wstr_len = MultiByteToWideChar(
@@ -583,8 +570,8 @@ static wchar_t *multibyte_to_wstr(const char *multibyte) {
         0,
         0);
 
-    wchar_t *result = (wchar_t*)malloc(sizeof(wchar_t) * (wstr_len + 1));
-    
+    wchar_t* result = (wchar_t*)malloc(sizeof(wchar_t) * (wstr_len + 1));
+
     MultiByteToWideChar(
         CP_UTF8,
         MB_ERR_INVALID_CHARS,
