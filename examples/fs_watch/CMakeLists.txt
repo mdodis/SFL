@@ -11,12 +11,6 @@ if (WIN32)
 endif()
 
 set(DEBUG_FLAGS "")
-if (WIN32)
-    set(DEBUG_FLAGS
-        ${DEBUG_FLAGS}
-        -fsanitize=address
-        -MTd)
-endif()
 
 message("Debug flags = ${DEBUG_FLAGS}")
 
