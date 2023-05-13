@@ -70,7 +70,7 @@ typedef struct {
 
 extern void sfl_uuid_init(SflUUIDContext* ctx);
 extern void sfl_uuid_gen_v4(SflUUIDContext* ctx, SflUUID* out);
-extern void sfl_uuid_to_string(SflUUID* uuid, char* out);
+extern void sfl_uuid_to_string(const SflUUID* uuid, char* out);
 #ifdef __cplusplus
 }
 #endif
@@ -164,7 +164,7 @@ void sfl_uuid_gen_v4(SflUUIDContext* ctx, SflUUID* out)
     out->bytes[8] = (out->bytes[8] & 0x3f) | 0x80;
 }
 
-void sfl_uuid_to_string(SflUUID* uuid, char* out)
+void sfl_uuid_to_string(const SflUUID* uuid, char* out)
 {
     static const char hex[] = {
         '0',

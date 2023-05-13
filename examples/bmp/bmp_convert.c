@@ -37,24 +37,25 @@ CONTRIBUTION
 Michael Dodis (michaeldodisgr@gmail.com)
 */
 #include <stdio.h>
+
 #include "sfl_bmp.h"
 
-int main(int argc, char *argv[]) {
-
+int main(int argc, char* argv[])
+{
     if (argc != 3) {
         fprintf(stderr, "Invalid number of arguments\n");
         return -1;
     }
 
     SflBmpContext read_ctx, write_ctx;
-    FILE *inf, *outf;
+    FILE *        inf, *outf;
 
     sfl_bmp_cstd_init(&read_ctx);
     sfl_bmp_cstd_init(&write_ctx);
 
     inf = fopen(argv[1], "rb");
     fseek(inf, 0, SEEK_END);
-    printf("File size %d\n", ftell(inf));
+    printf("File size %ld\n", ftell(inf));
     fseek(inf, 0, SEEK_SET);
     sfl_bmp_stdio_set_file(&read_ctx, inf);
 
@@ -63,19 +64,15 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    SflBmpDesc out_desc = {0};
-    out_desc.format = SFL_BMP_PIXEL_FORMAT_B8G8R8X8;
-    out_desc.compression = SFL_BMP_COMPRESSION_NONE;
+    SflBmpDesc out_desc     = {0};
+    out_desc.format         = SFL_BMP_PIXEL_FORMAT_B8G8R8X8;
+    out_desc.compression    = SFL_BMP_COMPRESSION_NONE;
     out_desc.file_header_id = SFL_BMP_HDR_ID_BM;
     out_desc.info_header_id = SFL_BMP_NFO_ID_V5;
 
     outf = fopen(argv[2], "wb");
     sfl_bmp_stdio_set_file(&write_ctx, outf);
-    sfl_bmp_encode(
-        &write_ctx,
-        &in_desc,
-        &read_ctx.io, 
-        &out_desc);
+    sfl_bmp_encode(&write_ctx, &in_desc, &read_ctx.io, &out_desc);
 
     fclose(outf);
     fclose(inf);

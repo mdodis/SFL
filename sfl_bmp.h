@@ -505,7 +505,9 @@ static int sfl_bmp__next_block(
 #define SFL_BMP_CEILF(x) (float)(ceil((double)x))
 #endif
 
-#define SFL_BMP_UNIMPLEMENTED() *((char*)0) = '\0'
+#ifndef SFL_BMP_UNIMPLEMENTED
+#define SFL_BMP_UNIMPLEMENTED()
+#endif
 
 #pragma pack(push, 1)
 typedef struct {
@@ -1290,11 +1292,11 @@ int sfl_bmp_probe(SflBmpContext* ctx, SflBmpDesc* desc)
             desc->attributes |= SFL_BMP_ATTRIBUTE_PALETTIZED;
 
             if (desc->compression == SFL_BMP_COMPRESSION_RLE4) {
-                if (!bpp == 4) {
+                if (bpp != 4) {
                     goto EXIT_PROC;
                 }
             } else if (desc->compression == SFL_BMP_COMPRESSION_RLE8) {
-                if (!bpp == 8) {
+                if (bpp != 8) {
                     goto EXIT_PROC;
                 }
             }

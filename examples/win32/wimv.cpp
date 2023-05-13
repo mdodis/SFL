@@ -64,15 +64,15 @@ const wchar_t* Window_Class_Name = L"wimv_viewer_window";
 const int      Client_Width      = 640;
 const int      Client_Height     = 480;
 
-#define CHECK_HRESULT(expr)                          \
-    do {                                             \
-        HRESULT _result = (expr);                    \
-        if (!SUCCEEDED(_result)) {                   \
-            char buf[256];                           \
-            sprintf(buf, "HRESULT = 0x%x", _result); \
-            MessageBoxA(0, #expr, buf, MB_OK);       \
-            ExitProcess(1);                          \
-        }                                            \
+#define CHECK_HRESULT(expr)                           \
+    do {                                              \
+        HRESULT _result = (expr);                     \
+        if (!SUCCEEDED(_result)) {                    \
+            char buf[256];                            \
+            sprintf(buf, "HRESULT = 0x%lx", _result); \
+            MessageBoxA(0, #expr, buf, MB_OK);        \
+            ExitProcess(1);                           \
+        }                                             \
     } while (0)
 
 static struct {
